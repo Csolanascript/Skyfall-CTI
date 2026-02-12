@@ -211,6 +211,9 @@ services:
     <<: *intelowl-common
     entrypoint: /opt/deploy/intel_owl/docker/entrypoints/celery_beat.sh
     ports: []
+    volumes: []                          # No comparte el volumen de logs (evita race condition)
+    depends_on:
+      - intelowl
     networks:
       - skyfall_backbone
 
@@ -218,6 +221,7 @@ services:
     <<: *intelowl-common
     entrypoint: /opt/deploy/intel_owl/docker/entrypoints/celery_default.sh
     ports: []
+    volumes: []                          # No comparte el volumen de logs (evita race condition)
     depends_on:
       - intelowl
     networks:
