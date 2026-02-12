@@ -1,0 +1,2 @@
+# Skyfall-CTI
+Event-driven platform bridging technical vulnerabilities and geopolitical analysis. It fuses NVD data with Telegram/Grok OSINT via STIX 2.1. Using Kafka, Neo4j, and Elasticsearch, it enables proactive defense via AI-assisted graph intelligence.
