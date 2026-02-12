@@ -1,0 +1,349 @@
+# ============================================================================
+#  SKYFALL-CTI  —  Plataforma CTI Proactiva y Multidimensional
+#  Docker Compose · Entorno de desarrollo
+# ============================================================================
+
+networks:
+  skyfall_public:
+    driver: bridge
+  skyfall_backbone:
+    internal: true                    # Aísla las bases de datos del exterior
+
+services:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  1. INFRAESTRUCTURA DE MENSAJERÍA (KAFKA)
+  # ═══════════════════════════════════════════════════════════════════════════
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - skyfall_backbone
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - skyfall_backbone
+      - skyfall_public
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  2. PERSISTENCIA HÍBRIDA
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # --- Elasticsearch: búsqueda semántica, logs, OSINT crudo ----
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - skyfall_backbone
+
+  # --- Neo4j: Knowledge Graph STIX 2.1 ---
+  neo4j:
+    image: neo4j:5.15.0
+    ports:
+      - "7474:7474"                   # Browser
+      - "7687:7687"                   # Bolt
+    environment:
+      NEO4J_AUTH: neo4j/skyfall2026
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - skyfall_backbone
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  3. ORQUESTACIÓN NO-CODE  —  2 instancias n8n
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Instancia 1 → Pipeline CVE (3 flujos):
+  #   F1: Recogida y filtrado CVE (NVD/KEVS)
+  #   F2: Enriquecimiento y estandarización STIX 2.1 (KEVin-API)
+  #   F3: Procesado final, enriquecimiento IOCs (Intel-Owl) y publicación Kafka
+  n8n-cve:
+    image: docker.n8n.io/n8nio/n8n
+    ports:
+      - "5678:5678"
+    environment:
+      GENERIC_TIMEZONE: Europe/Madrid
+      N8N_KAFKA_BROKER: kafka:29092
+      KEVIN_API_URL: http://kevin-api:8000
+      INTELOWL_URL: http://intelowl:80
+      INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
+    volumes:
+      - n8n_cve_data:/home/node/.n8n
+    depends_on:
+      - kafka
+      - kevin-api
+    networks:
+      - skyfall_public
+      - skyfall_backbone
+
+  # Instancia 2 → Pipeline OSINT / Social:
+  #   F4: Consolidación newsletters + detección campañas (LLM)
+  #   F5: Enriquecimiento campañas/IoCs → STIX 2.1 (newsletters)
+  #   F6: Síntesis inteligencia Grok/xAI sobre X
+  n8n-osint:
+    image: docker.n8n.io/n8nio/n8n
+    ports:
+      - "5679:5678"
+    environment:
+      GENERIC_TIMEZONE: Europe/Madrid
+      N8N_KAFKA_BROKER: kafka:29092
+      INTELOWL_URL: http://intelowl:80
+      INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
+      GROK_API_KEY: ${GROK_API_KEY:-}
+      GROK_API_URL: https://api.x.ai/v1
+    volumes:
+      - n8n_osint_data:/home/node/.n8n
+    depends_on:
+      - kafka
+    networks:
+      - skyfall_public
+      - skyfall_backbone
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  4. PRODUCTORES PROGRAMÁTICOS (PYTHON)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Crawler Telegram (Telethon MTProto) → HTTP POST a n8n-osint webhook
+  telegram-crawler:
+    build: ../services/telegram-crawler
+    environment:
+      PYTHONUNBUFFERED: "1"
+      N8N_WEBHOOK_URL: http://n8n-osint:5678/webhook/telegram
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_SESSION_NAME: skyfall_bot
+    volumes:
+      - telegram_sessions:/app/sessions
+    depends_on:
+      - n8n-osint
+    networks:
+      - skyfall_backbone
+      - skyfall_public
+
+  # Dumps Crawler: scraping de IP/hashes desde GitHub → Kafka topic: stix.dumps
+  # Pipeline completo en Python: descarga, parseo, enriquecimiento (Intel-Owl)
+  # y transformación a STIX 2.1 sin pasar por n8n
+  dumps-crawler:
+    build: ../services/dumps-crawler
+    environment:
+      PYTHONUNBUFFERED: "1"
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC: stix.dumps
+      INTELOWL_URL: http://intelowl:80
+      INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      SCRAPE_INTERVAL_SECONDS: "3600"
+    depends_on:
+      - kafka
+      - intelowl
+    networks:
+      - skyfall_backbone
+      - skyfall_public
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  5. PROCESAMIENTO Y ENRIQUECIMIENTO
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # KEVin-API: normalización CVE → STIX 2.1
+  kevin-api:
+    build: ../services/kevin-api
+    ports:
+      - "8001:8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      STIX_VERSION: "2.1"
+    networks:
+      - skyfall_backbone
+      - skyfall_public
+
+  # Intel-Owl: enriquecimiento automatizado de observables (IPs, hashes, dominios)
+  # Pivote desde n8n para AbuseIPDB, AlienVault OTX, VirusTotal, etc.
+  # Se despliega como 3 contenedores: uwsgi (API), celery-beat (scheduler),
+  # celery-worker (ejecución de analizadores).
+  intelowl: &intelowl-common
+    image: intelowlproject/intelowl:v6.5.1
+    entrypoint: /opt/deploy/intel_owl/docker/entrypoints/uwsgi.sh
+    ports:
+      - "8002:8001"
+    environment: &intelowl-env
+      DJANGO_SECRET: ${INTELOWL_DJANGO_SECRET:-changeme_in_production}
+      DEBUG: "True"
+      DJANGO_TEST_SERVER: "True"
+      DB_HOST: intelowl-db
+      DB_PORT: "5432"
+      DB_USER: intelowl
+      DB_PASSWORD: ${INTELOWL_DB_PASSWORD:-intelowl}
+      BROKER_URL: "redis://intelowl-redis:6379/1"
+      CELERY_BROKER_URL: "redis://intelowl-redis:6379/1"
+      REDIS_URI: "redis://intelowl-redis:6379/0"
+    volumes:
+      - intelowl_generic_logs:/var/log/intel_owl
+    depends_on:
+      - intelowl-db
+      - intelowl-redis
+    networks:
+      - skyfall_backbone
+      - skyfall_public
+
+  intelowl-celery-beat:
+    <<: *intelowl-common
+    entrypoint: /opt/deploy/intel_owl/docker/entrypoints/celery_beat.sh
+    ports: []
+    networks:
+      - skyfall_backbone
+
+  intelowl-celery-worker:
+    <<: *intelowl-common
+    entrypoint: /opt/deploy/intel_owl/docker/entrypoints/celery_default.sh
+    ports: []
+    depends_on:
+      - intelowl
+    networks:
+      - skyfall_backbone
+      - skyfall_public
+
+  intelowl-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: intelowl
+      POSTGRES_PASSWORD: ${INTELOWL_DB_PASSWORD:-intelowl}
+      POSTGRES_DB: intel_owl_db
+    volumes:
+      - intelowl_pg_data:/var/lib/postgresql/data
+    networks:
+      - skyfall_backbone
+
+  intelowl-redis:
+    image: redis:7-alpine
+    networks:
+      - skyfall_backbone
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  6. CONSUMIDORES KAFKA  —  Workers Python
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Consumer → Elasticsearch (indexación de STIX bundles + contenido crudo)
+  consumer-elastic:
+    build: ../services/consumer-elastic
+    environment:
+      PYTHONUNBUFFERED: "1"
+      KAFKA_BROKER: kafka:29092
+      KAFKA_GROUP_ID: cg-elasticsearch
+      KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    depends_on:
+      - kafka
+      - elasticsearch
+    networks:
+      - skyfall_backbone
+
+  # Consumer → Neo4j (inserción de nodos/relaciones STIX en el grafo)
+  consumer-neo4j:
+    build: ../services/consumer-neo4j
+    environment:
+      PYTHONUNBUFFERED: "1"
+      KAFKA_BROKER: kafka:29092
+      KAFKA_GROUP_ID: cg-neo4j
+      KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: skyfall2026
+    depends_on:
+      - kafka
+      - neo4j
+    networks:
+      - skyfall_backbone
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  7. MÓDULO DE INTELIGENCIA Y CORRELACIÓN
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Analiza el grafo Neo4j para detectar vínculos entre amenazas sociales
+  # y vulnerabilidades críticas. Expone API HTTP que el MCP-server consulta.
+  correlation-engine:
+    build: ../services/correlation-engine
+    ports:
+      - "8003:8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: skyfall2026
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    depends_on:
+      - neo4j
+      - elasticsearch
+    networks:
+      - skyfall_backbone
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  8. INTERFAZ DE ACCESO E INTELIGENCIA GENERATIVA
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # MCP Server (Model Context Protocol) — FastAPI + RAG
+  # Puente de contexto para que LLMs interroguen el sistema en lenguaje natural
+  mcp-server:
+    build: ../services/mcp-server
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: skyfall2026
+      CORRELATION_URL: http://correlation-engine:8000
+    depends_on:
+      - elasticsearch
+      - neo4j
+      - correlation-engine
+    networks:
+      - skyfall_public
+      - skyfall_backbone
+
+  # Frontend React — Dashboard CTI con D3.js + SSE
+  frontend:
+    build: ../services/frontend
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:8000
+      REACT_APP_SSE_URL: http://localhost:8000/events
+    depends_on:
+      - mcp-server
+    networks:
+      - skyfall_public
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  VOLÚMENES PERSISTENTES
+# ═══════════════════════════════════════════════════════════════════════════
+volumes:
+  es_data:
+  neo4j_data:
+  n8n_cve_data:
+  n8n_osint_data:
+  telegram_sessions:
+  intelowl_pg_data:
+  intelowl_generic_logs:

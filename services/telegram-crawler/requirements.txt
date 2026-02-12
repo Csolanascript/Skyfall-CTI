@@ -1,0 +1,2 @@
+telethon>=1.36
+confluent-kafka>=2.3

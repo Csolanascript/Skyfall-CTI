@@ -1,0 +1,112 @@
+# ============================================================================
+#  Skyfall-CTI · CI — Stack Integration Tests
+#  Ejecuta la batería de pruebas en cada push/PR
+# ============================================================================
+name: Stack Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'deployment/**'
+      - 'services/**'
+      - 'tests/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deployment/**'
+      - 'services/**'
+      - 'tests/**'
+
+env:
+  COMPOSE_PROJECT_NAME: skyfall-ci
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  #  1. Validación de sintaxis (rápido, sin Docker)
+  # ─────────────────────────────────────────────────────────────────────────
+  validate:
+    name: Validate Compose Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        working-directory: deployment
+        run: docker compose config --quiet
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  2. Build de todas las imágenes custom
+  # ─────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build Custom Images
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all custom services
+        working-directory: deployment
+        run: docker compose build --parallel
+
+  # ─────────────────────────────────────────────────────────────────────────
+  #  3. Tests de integración del stack completo
+  # ─────────────────────────────────────────────────────────────────────────
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Create .env for CI
+        working-directory: deployment
+        run: cp ../.github/ci.env .env
+
+      - name: Pull external images
+        working-directory: deployment
+        run: docker compose pull --quiet
+
+      - name: Build & start stack
+        working-directory: deployment
+        run: docker compose up -d --build --remove-orphans
+
+      - name: Wait for services to initialize
+        run: |
+          echo "Waiting 60s for all services to start..."
+          sleep 60
+
+      - name: Run test battery
+        working-directory: deployment
+        env:
+          COMPOSE_PROJECT_NAME: skyfall-ci
+        run: pytest ../tests/test_stack.py -v --tb=short --timeout=120
+
+      - name: Show container status (on failure)
+        if: failure()
+        working-directory: deployment
+        run: |
+          echo "=== CONTAINER STATUS ==="
+          docker compose ps -a
+          echo ""
+          echo "=== LOGS (last 30 lines per service) ==="
+          for svc in $(docker compose config --services); do
+            echo "--- $svc ---"
+            docker compose logs "$svc" --tail 30
+            echo ""
+          done
+
+      - name: Teardown
+        if: always()
+        working-directory: deployment
+        run: docker compose down -v --remove-orphans

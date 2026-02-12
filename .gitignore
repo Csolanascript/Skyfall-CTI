@@ -1,0 +1,25 @@
+# ── Secretos ──
+deployment/.env
+.env
+
+# ── Python ──
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# ── Docker ──
+*.log
+deployment/.cache/
+
+# ── Generados ──
+*.svg
+*.png
+
+# ── IDE ──
+.vscode/
+.idea/
+
+# ── OS ──
+.DS_Store
+Thumbs.db

@@ -1,0 +1,2 @@
+confluent-kafka>=2.3
+neo4j>=5.15
