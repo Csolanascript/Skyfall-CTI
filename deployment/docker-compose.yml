@@ -86,7 +86,7 @@ services:
     environment:
       GENERIC_TIMEZONE: Europe/Madrid
       N8N_KAFKA_BROKER: kafka:29092
-      KEVIN_API_URL: http://kevin-api:8000
+      KEVIN_API_URL: http://kevin-api:8444
       INTELOWL_URL: http://intelowl:80
       INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
     volumes:
@@ -166,14 +166,50 @@ services:
   #  5. PROCESAMIENTO Y ENRIQUECIMIENTO
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # KEVin-API: normalización CVE → STIX 2.1
+  # ── KEVin: API de CISA KEV + NVD/MITRE (synfinner/KEVin) ───────────
+  #  Requiere MongoDB + Redis.  Puerto interno 8444.
+  kevin-mongo:
+    image: mongo:7
+    volumes:
+      - kevin_mongo_data:/data/db
+    networks:
+      - skyfall_backbone
+
+  kevin-redis:
+    image: redis:7-alpine
+    networks:
+      - skyfall_backbone
+
+  # Poblador inicial: descarga KEV catalog de CISA y lo inserta en Mongo.
+  # Se ejecuta una sola vez al arrancar y termina.
+  kevin-update:
+    build: ../services/kevin-api
+    command: ["python", "update.py"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      MONGODB_URI_PROD: mongodb://kevin-mongo:27017/
+      API_KEY: ${NVD_API_KEY:-}
+    depends_on:
+      - kevin-mongo
+    networks:
+      - skyfall_backbone
+      - skyfall_public
+    restart: "no"
+
   kevin-api:
     build: ../services/kevin-api
     ports:
-      - "8001:8000"
+      - "8001:8444"
     environment:
       PYTHONUNBUFFERED: "1"
-      STIX_VERSION: "2.1"
+      MONGODB_URI_PROD: mongodb://kevin-mongo:27017/
+      REDIS_IP: kevin-redis
+      REDIS_PORT: "6379"
+      API_KEY: ${NVD_API_KEY:-}
+    depends_on:
+      - kevin-mongo
+      - kevin-redis
+      - kevin-update
     networks:
       - skyfall_backbone
       - skyfall_public
@@ -351,3 +387,4 @@ volumes:
   telegram_sessions:
   intelowl_pg_data:
   intelowl_generic_logs:
+  kevin_mongo_data:

@@ -49,6 +49,8 @@ ALL_SERVICES = [
     "n8n-osint",
     "telegram-crawler",
     "dumps-crawler",
+    "kevin-mongo",
+    "kevin-redis",
     "kevin-api",
     "intelowl",
     "intelowl-celery-beat",
@@ -312,16 +314,24 @@ class TestN8n:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestKevinAPI:
-    """Verifica KEVin-API (normalización CVE → STIX 2.1)."""
+    """Verifica KEVin API (synfinner/KEVin — Flask + MongoDB + Redis)."""
 
-    def test_health(self):
-        r = requests.get(f"http://localhost:{PORTS['kevin_api']}/health", timeout=10)
+    def test_homepage(self):
+        """La página principal de KEVin responde."""
+        r = requests.get(f"http://localhost:{PORTS['kevin_api']}", timeout=10)
         assert r.status_code == 200
-        assert r.json()["service"] == "kevin-api"
+        assert "KEVin" in r.text
 
-    def test_docs_available(self):
-        """Swagger UI de FastAPI está accesible."""
-        r = requests.get(f"http://localhost:{PORTS['kevin_api']}/docs", timeout=10)
+    def test_metrics_endpoint(self):
+        """El endpoint /get_metrics responde con métricas."""
+        r = requests.get(f"http://localhost:{PORTS['kevin_api']}/get_metrics", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert "cves_count" in data or "kevs_count" in data
+
+    def test_kev_endpoint(self):
+        """El endpoint /kev responde con datos de vulnerabilidades."""
+        r = requests.get(f"http://localhost:{PORTS['kevin_api']}/kev?per_page=1", timeout=10)
         assert r.status_code == 200
 
 
@@ -359,18 +369,23 @@ class TestIntelOwl:
 
     def test_api_responds(self):
         """Intel-Owl API responde (401 sin auth = funciona)."""
-        result = docker_exec(
-            "intelowl",
-            "python", "-c",
-            "import urllib.request, urllib.error\n"
-            "try:\n"
-            "    urllib.request.urlopen('http://localhost:8001/api/')\n"
-            "except urllib.error.HTTPError as e:\n"
-            "    print(e.code, e.read().decode())\n"
-            "except Exception as e:\n"
-            "    print('ERR', e)\n",
-        )
-        combined = result.stdout + result.stderr
+        # Intel-Owl tarda en arrancar (migraciones Django), retry hasta 90s
+        for attempt in range(6):
+            result = docker_exec(
+                "intelowl",
+                "python", "-c",
+                "import urllib.request, urllib.error\n"
+                "try:\n"
+                "    urllib.request.urlopen('http://localhost:8001/api/')\n"
+                "except urllib.error.HTTPError as e:\n"
+                "    print(e.code, e.read().decode())\n"
+                "except Exception as e:\n"
+                "    print('ERR', e)\n",
+            )
+            combined = result.stdout + result.stderr
+            if "401" in combined or "Authentication" in combined or "detail" in combined:
+                break
+            time.sleep(15)
         assert "401" in combined or "Authentication" in combined or "detail" in combined
 
     def test_celery_worker_alive(self):
@@ -463,9 +478,9 @@ class TestNetworkConnectivity:
         result = docker_exec(
             "n8n-cve",
             "wget", "-q", "-O", "-", "--timeout=5",
-            "http://kevin-api:8000/health",
+            "http://kevin-api:8444/get_metrics",
         )
-        assert "kevin-api" in result.stdout
+        assert "cves_count" in result.stdout or "kevs_count" in result.stdout
 
     def test_n8n_cve_reaches_kafka(self):
         """n8n-cve puede resolver el DNS de Kafka en backbone."""

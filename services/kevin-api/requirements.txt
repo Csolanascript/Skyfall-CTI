@@ -1,3 +1,10 @@
-fastapi>=0.110
-uvicorn>=0.27
-stix2>=3.0
+# Las dependencias se instalan desde el requirements.txt del repo KEVin
+# clonado durante el build del Dockerfile.
+# Este archivo se mantiene solo como referencia.
+#
+# Dependencias principales de KEVin:
+# flask, flask-restful, flask-compress, flask-cors, flask-orjson
+# gunicorn, gevent
+# pymongo, redis
+# python-dotenv
+# requests
