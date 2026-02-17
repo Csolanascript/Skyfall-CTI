@@ -85,10 +85,15 @@ services:
       - "5678:5678"
     environment:
       GENERIC_TIMEZONE: Europe/Madrid
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}
+      N8N_DEFAULT_USER_EMAIL: ${N8N_DEFAULT_USER_EMAIL:-admin@skyfall.local}
+      N8N_DEFAULT_USER_PASSWORD: ${N8N_DEFAULT_USER_PASSWORD:-}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       N8N_KAFKA_BROKER: kafka:29092
       KEVIN_API_URL: http://kevin-api:8444
       INTELOWL_URL: http://intelowl:80
       INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
+      
     volumes:
       - n8n_cve_data:/home/node/.n8n
     depends_on:
@@ -108,6 +113,10 @@ services:
       - "5679:5678"
     environment:
       GENERIC_TIMEZONE: Europe/Madrid
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}
+      N8N_DEFAULT_USER_EMAIL: ${N8N_DEFAULT_USER_EMAIL:-admin@skyfall.local}
+      N8N_DEFAULT_USER_PASSWORD: ${N8N_DEFAULT_USER_PASSWORD:-}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       N8N_KAFKA_BROKER: kafka:29092
       INTELOWL_URL: http://intelowl:80
       INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}

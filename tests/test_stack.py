@@ -120,6 +120,17 @@ def wait_for_http(url: str, timeout: int = 60, interval: int = 5) -> bool:
     return False
 
 
+def wait_for_internal(url: str, timeout: int = 60, interval: int = 5) -> bool:
+    """Espera a que un servicio en la red backbone Docker responda."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        body = curl_internal(url)
+        if body:
+            return True
+        time.sleep(interval)
+    return False
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  1. TESTS DE ESTADO DE CONTENEDORES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -152,6 +163,13 @@ class TestContainerStatus:
 
 class TestElasticsearch:
     """Verifica que Elasticsearch esté operativo."""
+
+    @classmethod
+    def setup_class(cls):
+        """Espera a que Elasticsearch esté listo (hasta 60s)."""
+        assert wait_for_internal(
+            "http://elasticsearch:9200", timeout=60
+        ), "Elasticsearch no arrancó en 60s"
 
     def test_cluster_health(self):
         """El cluster responde con nombre y versión."""
@@ -200,6 +218,13 @@ class TestElasticsearch:
 class TestNeo4j:
     """Verifica que Neo4j esté operativo."""
 
+    @classmethod
+    def setup_class(cls):
+        """Espera a que Neo4j HTTP esté listo (hasta 60s)."""
+        assert wait_for_internal(
+            "http://neo4j:7474", timeout=60
+        ), "Neo4j no arrancó en 60s"
+
     def test_http_api(self):
         """El endpoint HTTP responde con info del servidor."""
         body = curl_internal("http://neo4j:7474")
@@ -226,6 +251,20 @@ class TestNeo4j:
 
 class TestKafka:
     """Verifica que Kafka esté operativo."""
+
+    @classmethod
+    def setup_class(cls):
+        """Espera a que Kafka esté listo aceptando conexiones (hasta 30s)."""
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            r = docker_exec(
+                "kafka",
+                "kafka-topics", "--bootstrap-server", "localhost:9092", "--list",
+            )
+            if r.returncode == 0:
+                return
+            time.sleep(3)
+        raise AssertionError("Kafka no arrancó en 30s")
 
     def test_broker_accessible(self):
         """El broker responde a kafka-topics --list."""
@@ -254,17 +293,21 @@ class TestKafka:
             f'echo "skyfall-test-msg" | kafka-console-producer '
             f'--bootstrap-server localhost:9092 --topic {topic}',
         )
-        time.sleep(2)
+        time.sleep(3)
 
-        # Consumir mensaje
-        result = docker_exec(
-            "kafka",
-            "kafka-console-consumer",
-            "--bootstrap-server", "localhost:9092",
-            "--topic", topic,
-            "--from-beginning",
-            "--timeout-ms", "5000",
-        )
+        # Consumir mensaje (retry con timeout extendido)
+        for _ in range(3):
+            result = docker_exec(
+                "kafka",
+                "kafka-console-consumer",
+                "--bootstrap-server", "localhost:9092",
+                "--topic", topic,
+                "--from-beginning",
+                "--timeout-ms", "10000",
+            )
+            if "skyfall-test-msg" in result.stdout:
+                break
+            time.sleep(2)
         assert "skyfall-test-msg" in result.stdout
 
         # Limpiar
