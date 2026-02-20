@@ -1,0 +1,7 @@
+pyintelowl>=5.1
+confluent-kafka>=2.3
+aiohttp>=3.9
+uvloop>=0.19;sys_platform!="win32"
+stix2>=3.0
+fastapi>=0.110
+uvicorn>=0.27

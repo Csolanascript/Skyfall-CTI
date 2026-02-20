@@ -30,11 +30,11 @@ PORTS = {
     "neo4j_http": 7474,
     "neo4j_bolt": 7687,
     "kafka": 9092,
-    "n8n_cve": 5678,
-    "n8n_osint": 5679,
+    "n8n": 5679,
     "kevin_api": 8001,
     "intelowl": 8002,
     "correlation_engine": 8003,
+    "intelowl_client": 8004,
     "mcp_server": 8000,
     "frontend": 3000,
 }
@@ -45,8 +45,7 @@ ALL_SERVICES = [
     "kafka",
     "elasticsearch",
     "neo4j",
-    "n8n-cve",
-    "n8n-osint",
+    "n8n",
     "telegram-crawler",
     "dumps-crawler",
     "kevin-mongo",
@@ -57,6 +56,7 @@ ALL_SERVICES = [
     "intelowl-celery-worker",
     "intelowl-db",
     "intelowl-redis",
+    "intelowl-client",
     "consumer-elastic",
     "consumer-neo4j",
     "correlation-engine",
@@ -70,6 +70,7 @@ PYTHON_WORKERS = [
     "consumer-neo4j",
     "telegram-crawler",
     "dumps-crawler",
+    "intelowl-client",
 ]
 
 
@@ -323,29 +324,17 @@ class TestKafka:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestN8n:
-    """Verifica ambas instancias de n8n."""
+    """Verifica la instancia de n8n."""
 
-    def test_n8n_cve_health(self):
-        """n8n-cve responde al health check."""
-        r = requests.get(f"http://localhost:{PORTS['n8n_cve']}/healthz", timeout=10)
+    def test_n8n_health(self):
+        """n8n responde al health check."""
+        r = requests.get(f"http://localhost:{PORTS['n8n']}/healthz", timeout=10)
         assert r.status_code == 200
 
-    def test_n8n_osint_health(self):
-        """n8n-osint responde al health check."""
-        r = requests.get(f"http://localhost:{PORTS['n8n_osint']}/healthz", timeout=10)
-        assert r.status_code == 200
-
-    def test_n8n_instances_independent(self):
-        """Cada instancia tiene su propio volumen de datos."""
+    def test_n8n_data_volume(self):
+        """La instancia tiene su volumen de datos montado."""
         result = docker_compose(
-            "exec", "-T", "n8n-cve",
-            "ls", "/home/node/.n8n",
-            check=False,
-        )
-        assert result.returncode == 0
-
-        result = docker_compose(
-            "exec", "-T", "n8n-osint",
+            "exec", "-T", "n8n",
             "ls", "/home/node/.n8n",
             check=False,
         )
@@ -466,6 +455,183 @@ class TestIntelOwl:
         assert result.returncode == 0
 
 
+class TestIntelOwlClient:
+    """Verifica el cliente asíncrono de Intel-Owl (Python/FastAPI)."""
+
+    @classmethod
+    def setup_class(cls):
+        """Espera a que intelowl-client arranque (hasta 60s)."""
+        assert wait_for_internal(
+            "http://intelowl-client:8000/health", timeout=60
+        ), "intelowl-client no arrancó en 60s"
+
+    def test_health(self):
+        """El endpoint /health responde OK."""
+        r = requests.get(f"http://localhost:{PORTS['intelowl_client']}/health", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "ok"
+        assert data["service"] == "intelowl-client"
+
+    def test_health_internal(self):
+        """Responde al health desde la red backbone."""
+        body = curl_internal("http://intelowl-client:8000/health")
+        assert "intelowl-client" in body
+
+    def test_docs_available(self):
+        """La documentación OpenAPI está accesible."""
+        r = requests.get(f"http://localhost:{PORTS['intelowl_client']}/docs", timeout=10)
+        assert r.status_code == 200
+
+    def test_analyze_endpoint_rejects_empty(self):
+        """El endpoint /analyze rechaza peticiones sin observable."""
+        r = requests.post(
+            f"http://localhost:{PORTS['intelowl_client']}/analyze",
+            json={},
+            timeout=10,
+        )
+        assert r.status_code == 422  # Validation error
+
+    def test_batch_endpoint_exists(self):
+        """El endpoint /analyze/batch está registrado."""
+        r = requests.post(
+            f"http://localhost:{PORTS['intelowl_client']}/analyze/batch",
+            json={"observables": []},
+            timeout=10,
+        )
+        # Lista vacía → respuesta vacía pero 200
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_has_pyintelowl(self):
+        """La dependencia pyintelowl está instalada."""
+        result = docker_exec(
+            "intelowl-client",
+            "python", "-c", "from pyintelowl import IntelOwl; print('ok')",
+        )
+        assert result.returncode == 0
+        assert "ok" in result.stdout
+
+    def test_has_uvloop(self):
+        """uvloop está instalado (rendimiento)."""
+        result = docker_exec(
+            "intelowl-client",
+            "python", "-c", "import uvloop; print('ok')",
+        )
+        assert result.returncode == 0
+        assert "ok" in result.stdout
+
+    def test_has_stix2(self):
+        """La dependencia stix2 está instalada."""
+        result = docker_exec(
+            "intelowl-client",
+            "python", "-c", "import stix2; print('ok')",
+        )
+        assert result.returncode == 0
+        assert "ok" in result.stdout
+
+    def test_stix_converter_importable(self):
+        """El módulo stix_converter es importable dentro del contenedor."""
+        result = docker_exec(
+            "intelowl-client",
+            "python", "-c",
+            "from stix_converter import job_to_stix_bundle; print('ok')",
+        )
+        assert result.returncode == 0
+        assert "ok" in result.stdout
+
+    def test_stix_conversion_produces_valid_bundle(self):
+        """La conversión STIX genera un bundle válido con un job simulado."""
+        code = """
+import json
+from stix_converter import job_to_stix_bundle
+job = {
+    "id": 999,
+    "observable_name": "8.8.8.8",
+    "observable_classification": "ip",
+    "status": "reported_without_fails",
+    "tlp": "AMBER",
+    "received_request_time": "2025-01-01T00:00:00Z",
+    "finished_analysis_time": "2025-01-01T00:00:05Z",
+    "process_time": 5.0,
+    "analyzer_reports": [
+        {
+            "name": "AbuseIPDB",
+            "status": "SUCCESS",
+            "report": {"abuse_confidence_score": 0},
+            "errors": [],
+            "process_time": 1.2,
+            "start_time": "2025-01-01T00:00:01Z",
+            "end_time": "2025-01-01T00:00:02Z",
+            "type": "analyzer"
+        }
+    ]
+}
+bundle = job_to_stix_bundle(job)
+assert bundle["type"] == "bundle"
+assert bundle["id"].startswith("bundle--")
+types = {o["type"] for o in bundle["objects"]}
+assert "identity" in types
+assert "indicator" in types
+assert "report" in types
+assert "note" in types
+assert "ipv4-addr" in types
+assert "relationship" in types
+print("stix_ok")
+"""
+        result = docker_exec("intelowl-client", "python", "-c", code)
+        assert result.returncode == 0, f"STIX conversion failed: {result.stderr}"
+        assert "stix_ok" in result.stdout
+
+    def test_stix_conversion_malicious_detection(self):
+        """Detecta maliciosidad y genera objetos Malware + Relationship."""
+        code = """
+import json
+from stix_converter import job_to_stix_bundle
+job = {
+    "id": 1000,
+    "observable_name": "evil.example.com",
+    "observable_classification": "domain",
+    "status": "reported_without_fails",
+    "tlp": "RED",
+    "received_request_time": "2025-01-01T00:00:00Z",
+    "finished_analysis_time": "2025-01-01T00:00:05Z",
+    "process_time": 5.0,
+    "analyzer_reports": [
+        {
+            "name": "VirusTotal_v3",
+            "status": "SUCCESS",
+            "report": {"malicious": True, "positives": 15, "total": 70},
+            "errors": [],
+            "process_time": 2.0,
+            "type": "analyzer"
+        }
+    ]
+}
+bundle = job_to_stix_bundle(job)
+types = [o["type"] for o in bundle["objects"]]
+assert "malware" in types, f"No malware object found. Types: {types}"
+rel_types = [o["relationship_type"] for o in bundle["objects"] if o["type"] == "relationship"]
+assert "indicates" in rel_types, f"No 'indicates' relationship. Rels: {rel_types}"
+indicator = [o for o in bundle["objects"] if o["type"] == "indicator"][0]
+assert "malicious" in indicator.get("labels", [])
+print("malicious_ok")
+"""
+        result = docker_exec("intelowl-client", "python", "-c", code)
+        assert result.returncode == 0, f"Malicious detection failed: {result.stderr}"
+        assert "malicious_ok" in result.stdout
+
+    def test_stix_output_env_var(self):
+        """La variable STIX_OUTPUT está configurada en el contenedor."""
+        result = docker_exec(
+            "intelowl-client",
+            "python", "-c",
+            "import os; print(os.getenv('STIX_OUTPUT', 'unset'))",
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == "true"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  6. TESTS DE WORKERS PYTHON
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -516,19 +682,10 @@ class TestNetworkConnectivity:
     a través de las redes Docker definidas.
     """
 
-    def test_n8n_cve_reaches_kevin_api(self):
-        """n8n-cve puede alcanzar KEVin-API por la red backbone."""
+    def test_n8n_reaches_kafka(self):
+        """n8n puede resolver el DNS de Kafka en backbone."""
         result = docker_exec(
-            "n8n-cve",
-            "wget", "-q", "-O", "-", "--timeout=5",
-            "http://kevin-api:8444/get_metrics",
-        )
-        assert "cves_count" in result.stdout or "kevs_count" in result.stdout
-
-    def test_n8n_cve_reaches_kafka(self):
-        """n8n-cve puede resolver el DNS de Kafka en backbone."""
-        result = docker_exec(
-            "n8n-cve",
+            "n8n",
             "wget", "-q", "-O", "-", "--timeout=5",
             "http://kafka:29092",
         )
@@ -537,6 +694,35 @@ class TestNetworkConnectivity:
         # Suficiente verificar que no sea error de resolución
         combined = result.stdout + result.stderr
         assert "Resolving kafka" not in combined or "failed" not in combined.lower()
+
+    def test_intelowl_client_reaches_intelowl(self):
+        """intelowl-client puede alcanzar Intel-Owl API."""
+        result = docker_exec(
+            "intelowl-client",
+            "python", "-c",
+            "import urllib.request, urllib.error\n"
+            "try:\n"
+            "    urllib.request.urlopen('http://intelowl:8001/api/')\n"
+            "except urllib.error.HTTPError as e:\n"
+            "    print(e.code)\n"
+            "except Exception as e:\n"
+            "    print('ERR', e)\n",
+        )
+        combined = result.stdout + result.stderr
+        assert "401" in combined or "200" in combined
+
+    def test_intelowl_client_reaches_kafka(self):
+        """intelowl-client puede conectar a Kafka."""
+        result = docker_exec(
+            "intelowl-client",
+            "python", "-c",
+            "from confluent_kafka import Producer; "
+            "p = Producer({'bootstrap.servers': 'kafka:29092'}); "
+            "p.flush(timeout=5); "
+            "print('ok')",
+        )
+        assert result.returncode == 0
+        assert "ok" in result.stdout
 
     def test_mcp_reaches_correlation(self):
         """MCP-server puede alcanzar el correlation-engine."""

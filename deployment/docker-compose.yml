@@ -72,42 +72,14 @@ services:
       - skyfall_backbone
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  3. ORQUESTACIÓN NO-CODE  —  2 instancias n8n
+  #  3. ORQUESTACIÓN NO-CODE  —  n8n
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # Instancia 1 → Pipeline CVE (3 flujos):
-  #   F1: Recogida y filtrado CVE (NVD/KEVS)
-  #   F2: Enriquecimiento y estandarización STIX 2.1 (KEVin-API)
-  #   F3: Procesado final, enriquecimiento IOCs (Intel-Owl) y publicación Kafka
-  n8n-cve:
-    image: docker.n8n.io/n8nio/n8n
-    ports:
-      - "5678:5678"
-    environment:
-      GENERIC_TIMEZONE: Europe/Madrid
-      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}
-      N8N_DEFAULT_USER_EMAIL: ${N8N_DEFAULT_USER_EMAIL:-admin@skyfall.local}
-      N8N_DEFAULT_USER_PASSWORD: ${N8N_DEFAULT_USER_PASSWORD:-}
-      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
-      N8N_KAFKA_BROKER: kafka:29092
-      KEVIN_API_URL: http://kevin-api:8444
-      INTELOWL_URL: http://intelowl:80
-      INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
-      
-    volumes:
-      - n8n_cve_data:/home/node/.n8n
-    depends_on:
-      - kafka
-      - kevin-api
-    networks:
-      - skyfall_public
-      - skyfall_backbone
-
-  # Instancia 2 → Pipeline OSINT / Social:
+  # Instancia n8n → Pipeline OSINT / Social:
   #   F4: Consolidación newsletters + detección campañas (LLM)
   #   F5: Enriquecimiento campañas/IoCs → STIX 2.1 (newsletters)
   #   F6: Síntesis inteligencia Grok/xAI sobre X
-  n8n-osint:
+  n8n:
     image: docker.n8n.io/n8nio/n8n
     ports:
       - "5679:5678"
@@ -118,12 +90,12 @@ services:
       N8N_DEFAULT_USER_PASSWORD: ${N8N_DEFAULT_USER_PASSWORD:-}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       N8N_KAFKA_BROKER: kafka:29092
-      INTELOWL_URL: http://intelowl:80
+      INTELOWL_URL: http://intelowl:8001
       INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
       GROK_API_KEY: ${GROK_API_KEY:-}
       GROK_API_URL: https://api.x.ai/v1
     volumes:
-      - n8n_osint_data:/home/node/.n8n
+      - n8n_data:/home/node/.n8n
     depends_on:
       - kafka
     networks:
@@ -139,14 +111,14 @@ services:
     build: ../services/telegram-crawler
     environment:
       PYTHONUNBUFFERED: "1"
-      N8N_WEBHOOK_URL: http://n8n-osint:5678/webhook/telegram
+      N8N_WEBHOOK_URL: http://n8n:5678/webhook/telegram
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
       TELEGRAM_SESSION_NAME: skyfall_bot
     volumes:
       - telegram_sessions:/app/sessions
     depends_on:
-      - n8n-osint
+      - n8n
     networks:
       - skyfall_backbone
       - skyfall_public
@@ -160,7 +132,7 @@ services:
       PYTHONUNBUFFERED: "1"
       KAFKA_BROKER: kafka:29092
       KAFKA_TOPIC: stix.dumps
-      INTELOWL_URL: http://intelowl:80
+      INTELOWL_URL: http://intelowl:8001
       INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       SCRAPE_INTERVAL_SECONDS: "3600"
@@ -256,7 +228,7 @@ services:
     <<: *intelowl-common
     entrypoint: /opt/deploy/intel_owl/docker/entrypoints/celery_beat.sh
     ports: []
-    volumes: []                          # No comparte el volumen de logs (evita race condition)
+    volumes: []                          
     depends_on:
       - intelowl
     networks:
@@ -288,6 +260,37 @@ services:
     image: redis:7-alpine
     networks:
       - skyfall_backbone
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  5b. CLIENTE INTEL-OWL (PYTHON ASYNC)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Cliente asíncrono de alto rendimiento para enriquecimiento de
+  # observables (IPs, hashes, dominios, URLs) mediante Intel-Owl.
+  # Usa pyintelowl + asyncio + uvloop. Expone API HTTP y consume/produce Kafka.
+  intelowl-client:
+    build: ../services/intelowl-client
+    ports:
+      - "8004:8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+      INTELOWL_URL: http://intelowl:8001
+      INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
+      KAFKA_BROKER: kafka:29092
+      KAFKA_GROUP_ID: cg-intelowl-client
+      KAFKA_INPUT_TOPICS: enrichment.requests
+      KAFKA_OUTPUT_TOPIC: enrichment.results
+      MAX_CONCURRENCY: "10"
+      POLL_INTERVAL_SEC: "2"
+      POLL_TIMEOUT_SEC: "300"
+      ANALYZERS_DEFAULT: "BGP_Ranking,Classic_DNS,FireHol_IPList"
+      STIX_OUTPUT: "true"
+    depends_on:
+      - kafka
+      - intelowl
+    networks:
+      - skyfall_backbone
+      - skyfall_public
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  6. CONSUMIDORES KAFKA  —  Workers Python
@@ -391,8 +394,7 @@ services:
 volumes:
   es_data:
   neo4j_data:
-  n8n_cve_data:
-  n8n_osint_data:
+  n8n_data:
   telegram_sessions:
   intelowl_pg_data:
   intelowl_generic_logs:
