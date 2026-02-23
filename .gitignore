@@ -12,9 +12,6 @@ __pycache__/
 *.log
 deployment/.cache/
 
-# ── Generados ──
-*.svg
-*.png
 
 # ── IDE ──
 .vscode/

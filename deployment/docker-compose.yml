@@ -195,71 +195,153 @@ services:
       - skyfall_backbone
       - skyfall_public
 
-  # Intel-Owl: enriquecimiento automatizado de observables (IPs, hashes, dominios)
-  # Pivote desde n8n para AbuseIPDB, AlienVault OTX, VirusTotal, etc.
-  # Se despliega como 3 contenedores: uwsgi (API), celery-beat (scheduler),
-  # celery-worker (ejecución de analizadores).
-  intelowl: &intelowl-common
-    image: intelowlproject/intelowl:v6.5.1
-    entrypoint: /opt/deploy/intel_owl/docker/entrypoints/uwsgi.sh
-    ports:
-      - "8002:8001"
-    environment: &intelowl-env
-      DJANGO_SECRET: ${INTELOWL_DJANGO_SECRET:-changeme_in_production}
-      DEBUG: "True"
-      DJANGO_TEST_SERVER: "True"
-      DB_HOST: intelowl-db
-      DB_PORT: "5432"
-      DB_USER: intelowl
-      DB_PASSWORD: ${INTELOWL_DB_PASSWORD:-intelowl}
-      BROKER_URL: "redis://intelowl-redis:6379/1"
-      CELERY_BROKER_URL: "redis://intelowl-redis:6379/1"
-      REDIS_URI: "redis://intelowl-redis:6379/0"
-    volumes:
-      - intelowl_generic_logs:/var/log/intel_owl
-    depends_on:
-      - intelowl-db
-      - intelowl-redis
-    networks:
-      - skyfall_backbone
-      - skyfall_public
+  # ── Intel-Owl v6.5.1: despliegue stock siguiendo la guía oficial ────────
+  #  https://intelowlproject.github.io/docs/IntelOwl/installation/
+  #  Equivalente a:  ./start prod up
+  #  Compose files oficiales replicados:
+  #    docker/default.yml + postgres.override.yml + redis.override.yml
+  #  Contenedores: uwsgi · daphne · celery_beat · celery_worker_default
+  #                + postgres + redis  (nginx omitido: API directa en :8001)
+  # ────────────────────────────────────────────────────────────────────────
 
-  intelowl-celery-beat:
-    <<: *intelowl-common
-    entrypoint: /opt/deploy/intel_owl/docker/entrypoints/celery_beat.sh
-    ports: []
-    volumes: []                          
-    depends_on:
-      - intelowl
-    networks:
-      - skyfall_backbone
-
-  intelowl-celery-worker:
-    <<: *intelowl-common
-    entrypoint: /opt/deploy/intel_owl/docker/entrypoints/celery_default.sh
-    ports: []
-    volumes: []                          # No comparte el volumen de logs (evita race condition)
-    depends_on:
-      - intelowl
-    networks:
-      - skyfall_backbone
-      - skyfall_public
-
+  # --- Intel-Owl: PostgreSQL 16 (igual que postgres.override.yml) ---
   intelowl-db:
-    image: postgres:16-alpine
+    image: library/postgres:16-alpine
+    volumes:
+      - intelowl_pg_data:/var/lib/postgresql/data/
     environment:
       POSTGRES_USER: intelowl
       POSTGRES_PASSWORD: ${INTELOWL_DB_PASSWORD:-intelowl}
       POSTGRES_DB: intel_owl_db
-    volumes:
-      - intelowl_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+      start_period: 3s
     networks:
       - skyfall_backbone
 
+  # --- Intel-Owl: Redis 7 (igual que redis.override.yml) ---
   intelowl-redis:
-    image: redis:7-alpine
+    image: library/redis:7-alpine
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -h 127.0.0.1 ping | grep PONG"]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+      start_period: 3s
     networks:
       - skyfall_backbone
+
+  # --- Intel-Owl: uWSGI / Django API  (nombre "intelowl" para compat) ---
+  #  En modo DEBUG+TEST_SERVER arranca con `manage.py runserver` y crea
+  #  automáticamente un superusuario admin / admin.
+  intelowl:
+    image: intelowlproject/intelowl:v6.5.1
+    entrypoint:
+      - ./docker/entrypoints/uwsgi.sh
+    ports:
+      - "8002:8001"
+    expose:
+      - "8001"
+    environment: &intelowl-env
+      # ── Secrets / DB ──
+      DJANGO_SECRET: ${INTELOWL_DJANGO_SECRET:-changeme_in_production}
+      DB_HOST: intelowl-db
+      DB_PORT: "5432"
+      DB_USER: intelowl
+      DB_PASSWORD: ${INTELOWL_DB_PASSWORD:-intelowl}
+      DB_NAME: intel_owl_db
+      DB_SSL: "False"
+      # ── Broker / WebSockets (Redis) ──
+      BROKER_URL: "redis://intelowl-redis:6379/1"
+      WEBSOCKETS_URL: "redis://intelowl-redis:6379/0"
+      # ── App ──
+      DJANGO_TEST_SERVER: "True"
+      DEBUG: "True"
+      STAGE: "local"
+      HTTPS_ENABLED: "not_enabled"
+      LOCAL_STORAGE: "True"
+      INTELOWL_WEB_CLIENT_DOMAIN: localhost
+    volumes:
+      - intelowl_generic_logs:/var/log/intel_owl
+      - intelowl_static_content:/opt/deploy/intel_owl/static
+      - intelowl_shared_files:/opt/deploy/files_required
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8001 || exit 1"]
+      interval: 5s
+      timeout: 2s
+      start_period: 300s
+      retries: 2
+    depends_on:
+      intelowl-db:
+        condition: service_healthy
+      intelowl-redis:
+        condition: service_healthy
+    networks:
+      - skyfall_backbone
+      - skyfall_public
+
+  # --- Intel-Owl: Daphne (ASGI · WebSockets) ---
+  intelowl-daphne:
+    image: intelowlproject/intelowl:v6.5.1
+    restart: unless-stopped
+    entrypoint:
+      - ./docker/entrypoints/daphne.sh
+    expose:
+      - "8011"
+    environment: *intelowl-env
+    volumes:
+      - intelowl_generic_logs:/var/log/intel_owl
+      - intelowl_shared_files:/opt/deploy/files_required
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8011 || exit 1"]
+      interval: 5s
+      timeout: 2s
+      start_period: 2s
+      retries: 6
+    depends_on:
+      intelowl:
+        condition: service_healthy
+    networks:
+      - skyfall_backbone
+
+  # --- Intel-Owl: Celery Beat (scheduler periódico — playbooks, ingestors) ---
+  intelowl-celery-beat:
+    image: intelowlproject/intelowl:v6.5.1
+    restart: unless-stopped
+    entrypoint:
+      - ./docker/entrypoints/celery_beat.sh
+    environment: *intelowl-env
+    volumes:
+      - intelowl_generic_logs:/var/log/intel_owl
+      - intelowl_shared_files:/opt/deploy/files_required
+    depends_on:
+      intelowl:
+        condition: service_healthy
+    networks:
+      - skyfall_backbone
+
+  # --- Intel-Owl: Celery Worker Default (ejecutor de analizadores) ---
+  intelowl-celery-worker:
+    image: intelowlproject/intelowl:v6.5.1
+    restart: unless-stopped
+    stop_grace_period: 10s
+    entrypoint:
+      - ./docker/entrypoints/celery_default.sh
+    environment: *intelowl-env
+    volumes:
+      - intelowl_generic_logs:/var/log/intel_owl
+      - intelowl_shared_files:/opt/deploy/files_required
+    depends_on:
+      intelowl:
+        condition: service_healthy
+    networks:
+      - skyfall_backbone
+      - skyfall_public
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  5b. CLIENTE INTEL-OWL (PYTHON ASYNC)
@@ -398,4 +480,6 @@ volumes:
   telegram_sessions:
   intelowl_pg_data:
   intelowl_generic_logs:
+  intelowl_static_content:
+  intelowl_shared_files:
   kevin_mongo_data:

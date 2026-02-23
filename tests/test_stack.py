@@ -52,6 +52,7 @@ ALL_SERVICES = [
     "kevin-redis",
     "kevin-api",
     "intelowl",
+    "intelowl-daphne",
     "intelowl-celery-beat",
     "intelowl-celery-worker",
     "intelowl-db",
@@ -146,10 +147,9 @@ class TestContainerStatus:
 
     def test_all_containers_running(self):
         """Todos los servicios definidos están en estado 'Up'."""
-        result = docker_compose("ps", "-a", "--format", "{{.Name}}\t{{.Status}}")
+        result = docker_compose("ps", "-a", "--format", "{{.Service}}\t{{.Status}}")
         output = result.stdout
         for service in ALL_SERVICES:
-            # El nombre del contenedor incluye el project name como prefijo
             matching = [l for l in output.splitlines() if service in l]
             assert matching, f"Servicio {service} no encontrado en 'docker compose ps'"
             for line in matching:
@@ -397,54 +397,9 @@ class TestMCPServer:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestIntelOwl:
-    """Verifica Intel-Owl y sus workers."""
+    """Verifica Intel-Owl v6.5.1 (despliegue stock: uwsgi + daphne + celery)."""
 
-    def test_api_responds(self):
-        """Intel-Owl API responde (401 sin auth = funciona)."""
-        # Intel-Owl tarda en arrancar (migraciones Django), retry hasta 90s
-        for attempt in range(6):
-            result = docker_exec(
-                "intelowl",
-                "python", "-c",
-                "import urllib.request, urllib.error\n"
-                "try:\n"
-                "    urllib.request.urlopen('http://localhost:8001/api/')\n"
-                "except urllib.error.HTTPError as e:\n"
-                "    print(e.code, e.read().decode())\n"
-                "except Exception as e:\n"
-                "    print('ERR', e)\n",
-            )
-            combined = result.stdout + result.stderr
-            if "401" in combined or "Authentication" in combined or "detail" in combined:
-                break
-            time.sleep(15)
-        assert "401" in combined or "Authentication" in combined or "detail" in combined
-
-    def test_celery_worker_alive(self):
-        """El worker Celery está corriendo."""
-        result = docker_compose(
-            "ps", "intelowl-celery-worker",
-            "--format", "{{.Status}}",
-            check=False,
-        )
-        assert "Up" in result.stdout
-
-    def test_celery_beat_alive(self):
-        """El scheduler Celery está corriendo."""
-        result = docker_compose(
-            "ps", "intelowl-celery-beat",
-            "--format", "{{.Status}}",
-            check=False,
-        )
-        assert "Up" in result.stdout
-
-    def test_redis_accessible(self):
-        """Redis responde a PING desde Intel-Owl."""
-        result = docker_exec(
-            "intelowl-redis",
-            "redis-cli", "ping",
-        )
-        assert "PONG" in result.stdout
+    # ── Infraestructura interna ──
 
     def test_postgres_accessible(self):
         """PostgreSQL acepta conexiones."""
@@ -453,6 +408,94 @@ class TestIntelOwl:
             "pg_isready", "-U", "intelowl", "-d", "intel_owl_db",
         )
         assert result.returncode == 0
+
+    def test_postgres_has_tables(self):
+        """Las migraciones Django crearon tablas en la BD."""
+        result = docker_exec(
+            "intelowl-db",
+            "psql", "-U", "intelowl", "-d", "intel_owl_db",
+            "-tAc", "SELECT count(*) FROM information_schema.tables "
+                    "WHERE table_schema='public';",
+        )
+        assert result.returncode == 0
+        count = int(result.stdout.strip())
+        assert count > 30, f"Solo {count} tablas; las migraciones no se aplicaron"
+
+    def test_redis_accessible(self):
+        """Redis responde a PING."""
+        result = docker_exec(
+            "intelowl-redis",
+            "redis-cli", "ping",
+        )
+        assert "PONG" in result.stdout
+
+    # ── uWSGI / Django API ──
+
+    def test_uwsgi_healthy(self):
+        """El contenedor uwsgi pasó su health check."""
+        result = docker_compose(
+            "ps", "intelowl",
+            "--format", "{{.Status}}",
+            check=False,
+        )
+        assert "healthy" in result.stdout.lower()
+
+    def test_api_responds_401(self):
+        """Intel-Owl API responde 401 sin auth (señal de que funciona)."""
+        r = requests.get(
+            f"http://localhost:{PORTS['intelowl']}/api/",
+            timeout=15,
+        )
+        assert r.status_code == 401
+
+    # ── Daphne (WebSockets / ASGI) ──
+
+    def test_daphne_healthy(self):
+        """El contenedor daphne pasó su health check."""
+        result = docker_compose(
+            "ps", "intelowl-daphne",
+            "--format", "{{.Status}}",
+            check=False,
+        )
+        assert "healthy" in result.stdout.lower()
+
+    # ── Celery Beat (scheduler) ──
+
+    def test_celery_beat_alive(self):
+        """El scheduler Celery Beat está corriendo."""
+        result = docker_compose(
+            "ps", "intelowl-celery-beat",
+            "--format", "{{.Status}}",
+            check=False,
+        )
+        assert "Up" in result.stdout
+
+    def test_celery_beat_connected_to_broker(self):
+        """Celery Beat se conectó al broker Redis."""
+        result = docker_compose("logs", "intelowl-celery-beat", check=False)
+        assert "redis://intelowl-redis:6379/1" in result.stdout + result.stderr
+
+    # ── Celery Worker Default ──
+
+    def test_celery_worker_alive(self):
+        """El worker Celery Default está corriendo."""
+        result = docker_compose(
+            "ps", "intelowl-celery-worker",
+            "--format", "{{.Status}}",
+            check=False,
+        )
+        assert "Up" in result.stdout
+
+    def test_celery_worker_queues(self):
+        """El worker está suscrito a las colas default, broadcast y config."""
+        result = docker_compose("logs", "intelowl-celery-worker", check=False)
+        combined = result.stdout + result.stderr
+        for queue in ["default", "broadcast", "config"]:
+            assert queue in combined, (
+                f"Cola '{queue}' no encontrada en logs del worker"
+            )
+
+
 
 
 class TestIntelOwlClient:

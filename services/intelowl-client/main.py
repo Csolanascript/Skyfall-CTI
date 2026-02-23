@@ -22,6 +22,7 @@ Decisiones de rendimiento:
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -51,6 +52,7 @@ MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "10"))
 POLL_INTERVAL_SEC = float(os.getenv("POLL_INTERVAL_SEC", "2.0"))
 POLL_TIMEOUT_SEC = float(os.getenv("POLL_TIMEOUT_SEC", "300"))
 ANALYZERS_DEFAULT = os.getenv("ANALYZERS_DEFAULT", "")  # csv, vacío = todos
+IP_PLAYBOOK = os.getenv("IP_PLAYBOOK", "Popular_IP_Reputation_Services")
 STIX_OUTPUT = os.getenv("STIX_OUTPUT", "true").lower() in ("1", "true", "yes")
 
 # ──────────────────────────────────────────────────────────────────────
@@ -83,6 +85,34 @@ def _build_owl_client() -> IntelOwl:
 # ──────────────────────────────────────────────────────────────────────
 #  Helpers asíncronos (run_in_executor para llamadas bloqueantes)
 # ──────────────────────────────────────────────────────────────────────
+def _is_ip(value: str) -> bool:
+    """Comprueba si el valor es una dirección IPv4 o IPv6 válida."""
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+async def _analyze_observable_playbook(
+    observable: str,
+    playbook: str,
+    tlp: str = "CLEAR",
+) -> Dict[str, Any]:
+    """Envía análisis de observable usando un playbook de Intel-Owl."""
+    loop = asyncio.get_running_loop()
+    async with _semaphore:  # type: ignore[union-attr]
+        result = await loop.run_in_executor(
+            None,
+            lambda: _owl.send_observable_analysis_playbook_request(  # type: ignore[union-attr]
+                observable_name=observable,
+                playbook_requested=playbook,
+                tlp=tlp,
+            ),
+        )
+    return result
+
+
 async def _analyze_observable(
     observable: str,
     analyzers: List[str] | None = None,
@@ -147,9 +177,17 @@ async def _analyze_and_wait(
     observable: str,
     analyzers: List[str] | None = None,
     tlp: str = "CLEAR",
+    playbook: str | None = None,
 ) -> Dict[str, Any]:
-    """Envía análisis + polling asíncrono del resultado completo."""
-    resp = await _analyze_observable(observable, analyzers=analyzers, tlp=tlp)
+    """Envía análisis + polling asíncrono del resultado completo.
+
+    Si se indica *playbook*, se usa la API de playbooks en vez de la de
+    analizadores individuales.
+    """
+    if playbook:
+        resp = await _analyze_observable_playbook(observable, playbook=playbook, tlp=tlp)
+    else:
+        resp = await _analyze_observable(observable, analyzers=analyzers, tlp=tlp)
     job_id = resp.get("job_id")
     if not job_id:
         return resp
@@ -226,11 +264,18 @@ async def _kafka_consumer_loop():
                 continue
 
             analyzers = payload.get("analyzers") or default_analyzers
+            playbook = payload.get("playbook")  # playbook explícito en el msg
             tlp = payload.get("tlp", "CLEAR")
+
+            # Si es una IP y no se piden analyzers/playbook concretos, usar
+            # el playbook de reputación de IPs por defecto.
+            if not playbook and (not analyzers) and _is_ip(observable):
+                playbook = IP_PLAYBOOK
+                log.info("IP detectada → playbook=%s", playbook)
 
             # Fire-and-forget con gather limitado por semáforo
             asyncio.create_task(
-                _process_single(observable, analyzers, tlp)
+                _process_single(observable, analyzers, tlp, playbook=playbook)
             )
 
     except asyncio.CancelledError:
@@ -240,10 +285,17 @@ async def _kafka_consumer_loop():
         log.info("Kafka consumer cerrado")
 
 
-async def _process_single(observable: str, analyzers: list | None, tlp: str):
+async def _process_single(
+    observable: str,
+    analyzers: list | None,
+    tlp: str,
+    playbook: str | None = None,
+):
     """Analiza un observable, convierte a STIX 2.1 y publica."""
     try:
-        result = await _analyze_and_wait(observable, analyzers=analyzers, tlp=tlp)
+        result = await _analyze_and_wait(
+            observable, analyzers=analyzers, tlp=tlp, playbook=playbook,
+        )
 
         # ── Conversión a STIX 2.1 antes de publicar ──────────────
         if STIX_OUTPUT:
