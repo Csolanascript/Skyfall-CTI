@@ -52,7 +52,7 @@ MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "10"))
 POLL_INTERVAL_SEC = float(os.getenv("POLL_INTERVAL_SEC", "2.0"))
 POLL_TIMEOUT_SEC = float(os.getenv("POLL_TIMEOUT_SEC", "300"))
 ANALYZERS_DEFAULT = os.getenv("ANALYZERS_DEFAULT", "")  # csv, vacío = todos
-IP_PLAYBOOK = os.getenv("IP_PLAYBOOK", "Popular_IP_Reputation_Services")
+IP_PLAYBOOK = os.getenv("IP_PLAYBOOK", "SkyfallCTIipReputation")
 STIX_OUTPUT = os.getenv("STIX_OUTPUT", "true").lower() in ("1", "true", "yes")
 
 # ──────────────────────────────────────────────────────────────────────
@@ -253,25 +253,39 @@ async def _kafka_consumer_loop():
                 continue
 
             try:
-                payload = json.loads(msg.value().decode("utf-8"))
+                raw = msg.value().decode("utf-8").strip()
+                # Quitar comillas externas si el mensaje llega double-quoted
+                while raw.startswith('"') and raw.endswith('"') and not raw.startswith('{"'):
+                    raw = raw[1:-1]
+                payload = json.loads(raw)
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                log.warning("Mensaje descartado (decode): %s", exc)
+                log.warning("Mensaje descartado (decode): %s  raw=%s", exc, msg.value()[:200])
                 continue
+
+            # Desempaquetar payload anidado (e.g. {"payload": "{\"observable\":...}"})
+            if "payload" in payload and isinstance(payload["payload"], str):
+                try:
+                    payload = json.loads(payload["payload"])
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
             observable = payload.get("observable") or payload.get("value") or payload.get("name")
             if not observable:
                 log.warning("Mensaje sin observable válido: %s", payload)
                 continue
 
-            analyzers = payload.get("analyzers") or default_analyzers
             playbook = payload.get("playbook")  # playbook explícito en el msg
             tlp = payload.get("tlp", "CLEAR")
 
-            # Si es una IP y no se piden analyzers/playbook concretos, usar
-            # el playbook de reputación de IPs por defecto.
-            if not playbook and (not analyzers) and _is_ip(observable):
+            # Si es una IP y no se pide un playbook concreto, usar
+            # el playbook de reputación de IPs por defecto (tiene prioridad
+            # sobre analyzers sueltos / ANALYZERS_DEFAULT).
+            if not playbook and _is_ip(observable):
                 playbook = IP_PLAYBOOK
+                analyzers = None  # el playbook ya incluye sus propios analyzers
                 log.info("IP detectada → playbook=%s", playbook)
+            else:
+                analyzers = payload.get("analyzers") or default_analyzers
 
             # Fire-and-forget con gather limitado por semáforo
             asyncio.create_task(
