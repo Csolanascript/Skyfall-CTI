@@ -99,89 +99,36 @@ def curl_internal(url: str) -> str:
         [
             "docker", "run", "--rm",
             "--network", DOCKER_NETWORK,
-            "curlimages/curl", "-s", "-f", url,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.stdout
 
+            # ═══════════════════════════════════════════════════════════════════════════════
+            #  9. TESTS DE MITRE ATT&CK INGESTOR
+            # ═══════════════════════════════════════════════════════════════════════════════
 
-def wait_for_http(url: str, timeout: int = 60, interval: int = 5) -> bool:
-    """Espera hasta que un endpoint HTTP responda 2xx."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            r = requests.get(url, timeout=5)
-            if r.ok:
-                return True
-        except requests.RequestException:
-            pass
-        time.sleep(interval)
-    return False
+            class TestMitreIngestor:
+                """
+                Verifica que el contenedor mitre-ingestor se ejecutó correctamente:
+                descargó los datos de MITRE ATT&CK y los validó con stix2.
+                """
 
+                def test_container_exited_successfully(self):
+                    # Verifica que el contenedor mitre-ingestor terminó correctamente
+                    result = docker_compose("ps", "mitre-ingestor", "--format", "{{.Status}}", check=False)
+                    assert "Exited" in result.stdout or "exited" in result.stdout
 
-def wait_for_internal(url: str, timeout: int = 60, interval: int = 5) -> bool:
-    """Espera a que un servicio en la red backbone Docker responda."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        body = curl_internal(url)
-        if body:
-            return True
-        time.sleep(interval)
-    return False
+                def test_logs_show_completion(self):
+                    # Verifica que los logs muestran la preparación completada
+                    result = docker_compose("logs", "mitre-ingestor", check=False)
+                    assert "Preparación completada" in result.stdout
 
+                def test_logs_show_validation_ok(self):
+                    # Verifica que los logs muestran validación OK
+                    result = docker_compose("logs", "mitre-ingestor", check=False)
+                    assert "Validación" in result.stdout and "OK" in result.stdout
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  1. TESTS DE ESTADO DE CONTENEDORES
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestContainerStatus:
-    """Verifica que todos los contenedores estén corriendo."""
-
-    def test_compose_config_valid(self):
-        """docker compose config no produce errores."""
-        result = docker_compose("config", "--quiet")
-        assert result.returncode == 0
-
-    def test_all_containers_running(self):
-        """Todos los servicios definidos están en estado 'Up'."""
-        result = docker_compose("ps", "-a", "--format", "{{.Service}}\t{{.Status}}")
-        output = result.stdout
-        for service in ALL_SERVICES:
-            matching = [l for l in output.splitlines() if service in l]
-            assert matching, f"Servicio {service} no encontrado en 'docker compose ps'"
-            for line in matching:
-                assert "Up" in line, (
-                    f"Servicio {service} no está 'Up': {line}"
-                )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  2. TESTS DE INFRAESTRUCTURA
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestElasticsearch:
-    """Verifica que Elasticsearch esté operativo."""
-
-    @classmethod
-    def setup_class(cls):
-        """Espera a que Elasticsearch esté listo (hasta 60s)."""
-        assert wait_for_internal(
-            "http://elasticsearch:9200", timeout=60
-        ), "Elasticsearch no arrancó en 60s"
-
-    def test_cluster_health(self):
-        """El cluster responde con nombre y versión."""
-        body = curl_internal("http://elasticsearch:9200")
-        assert "docker-cluster" in body
-        assert "8.12.0" in body
-
-    def test_cluster_status(self):
-        """El cluster está en estado green o yellow."""
-        body = curl_internal("http://elasticsearch:9200/_cluster/health")
-        assert '"status":"green"' in body or '"status":"yellow"' in body
+                def test_logs_show_stix_types(self):
+                    # Verifica que los logs muestran el resumen de tipos STIX
+                    result = docker_compose("logs", "mitre-ingestor", check=False)
+                    assert "Resumen" in result.stdout and "TOTAL" in result.stdout
 
     def test_can_index_document(self):
         """Se puede indexar y buscar un documento de prueba."""
@@ -842,7 +789,112 @@ class TestNetworkConnectivity:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  9. TESTS DE RESILIENCIA BÁSICA
+#  9. TESTS DE MITRE ATT&CK INGESTOR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMitreIngestor:
+    """
+    Verifica que el contenedor mitre-ingestor se ejecutó correctamente:
+    descargó los datos de MITRE ATT&CK, los validó con stix2 y los
+    produjo en el topic stix.mitre de Kafka.
+    """
+
+    def test_container_exited_successfully(self):
+        """mitre-ingestor terminó con exit code 0 (ingesta completada)."""
+        result = docker_compose(
+            "ps", "-a", "mitre-ingestor",
+            "--format", "{{.Status}}",
+        )
+        status = result.stdout.strip().lower()
+        assert "exited (0)" in status, (
+            f"mitre-ingestor no terminó limpiamente: {result.stdout.strip()}"
+        )
+
+    def test_logs_show_completion(self):
+        """Los logs confirman que la ingesta se completó."""
+        result = docker_compose("logs", "mitre-ingestor", check=False)
+        combined = result.stdout + result.stderr
+        assert "Ingesta completada" in combined, (
+            "No se encontró mensaje de finalización en los logs"
+        )
+
+    def test_logs_show_enterprise_domain(self):
+        """Se descargó el dominio enterprise-attack."""
+        result = docker_compose("logs", "mitre-ingestor", check=False)
+        combined = result.stdout + result.stderr
+        assert "enterprise-attack" in combined
+
+    def test_logs_show_validation_ok(self):
+        """La validación con stix2.MemoryStore pasó correctamente."""
+        result = docker_compose("logs", "mitre-ingestor", check=False)
+        combined = result.stdout + result.stderr
+        assert "Validación" in combined and "OK" in combined, (
+            "No se encontró confirmación de validación STIX en los logs"
+        )
+
+    def test_logs_show_stix_types(self):
+        """El resumen muestra tipos STIX esperados (attack-pattern, etc.)."""
+        result = docker_compose("logs", "mitre-ingestor", check=False)
+        combined = result.stdout + result.stderr
+        for stix_type in ["attack-pattern", "intrusion-set", "malware", "relationship"]:
+            assert stix_type in combined, (
+                f"Tipo STIX '{stix_type}' no encontrado en los logs del ingestor"
+            )
+
+    def test_kafka_topic_stix_mitre_exists(self):
+        """El topic stix.mitre fue creado en Kafka."""
+        result = docker_exec(
+            "kafka",
+            "kafka-topics", "--bootstrap-server", "localhost:9092", "--list",
+        )
+        assert "stix.mitre" in result.stdout, (
+            f"Topic stix.mitre no encontrado. Topics: {result.stdout}"
+        )
+
+    def test_kafka_topic_has_messages(self):
+        """El topic stix.mitre contiene mensajes (al menos 1000)."""
+        # Obtener offsets del topic para calcular el número de mensajes
+        result = docker_exec(
+            "kafka",
+            "kafka-run-class", "kafka.tools.GetOffsetShell",
+            "--broker-list", "localhost:9092",
+            "--topic", "stix.mitre",
+        )
+        # La salida es del tipo: stix.mitre:0:15234
+        # Sumamos los offsets de todas las particiones
+        total_messages = 0
+        for line in result.stdout.strip().splitlines():
+            parts = line.strip().split(":")
+            if len(parts) >= 3:
+                total_messages += int(parts[2])
+
+        assert total_messages >= 1000, (
+            f"Solo {total_messages} mensajes en stix.mitre, "
+            f"se esperaban al menos 1000 (Enterprise ATT&CK tiene ~15000)"
+        )
+
+    def test_kafka_messages_are_valid_stix(self):
+        """Los mensajes en el topic son JSON válido con campos STIX."""
+        result = docker_exec(
+            "kafka",
+            "kafka-console-consumer",
+            "--bootstrap-server", "localhost:9092",
+            "--topic", "stix.mitre",
+            "--from-beginning",
+            "--max-messages", "5",
+            "--timeout-ms", "15000",
+        )
+        assert result.stdout.strip(), "No se pudo consumir ningún mensaje"
+
+        import json as _json
+        for line in result.stdout.strip().splitlines():
+            obj = _json.loads(line)
+            assert "type" in obj, f"Objeto STIX sin campo 'type': {line[:200]}"
+            assert "id" in obj, f"Objeto STIX sin campo 'id': {line[:200]}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  10. TESTS DE RESILIENCIA BÁSICA
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestResilience:

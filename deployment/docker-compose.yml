@@ -123,6 +123,23 @@ services:
       - skyfall_backbone
       - skyfall_public
 
+  # MITRE ATT&CK Ingestor: descarga Enterprise/Mobile/ICS ATT&CK desde GitHub,
+  # valida con stix2.MemoryStore y produce ~18 400 objetos STIX 2.1 en Kafka.
+  # Se ejecuta una sola vez al arrancar (restart: "no").
+  mitre-ingestor:
+    build: ../services/mitre-ingestor
+    environment:
+      PYTHONUNBUFFERED: "1"
+      KAFKA_BROKER: kafka:29092
+      KAFKA_TOPIC: stix.mitre
+      MITRE_DOMAINS: "enterprise-attack,mobile-attack,ics-attack"
+    depends_on:
+      - kafka
+    networks:
+      - skyfall_backbone
+      - skyfall_public
+    restart: "no"
+
   # Dumps Crawler: scraping de IP/hashes desde GitHub → Kafka topic: stix.dumps
   # Pipeline completo en Python: descarga, parseo, enriquecimiento (Intel-Owl)
   # y transformación a STIX 2.1 sin pasar por n8n
@@ -385,7 +402,7 @@ services:
       PYTHONUNBUFFERED: "1"
       KAFKA_BROKER: kafka:29092
       KAFKA_GROUP_ID: cg-elasticsearch
-      KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps
+      KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps,stix.mitre
       ELASTICSEARCH_URL: http://elasticsearch:9200
     depends_on:
       - kafka
@@ -400,7 +417,7 @@ services:
       PYTHONUNBUFFERED: "1"
       KAFKA_BROKER: kafka:29092
       KAFKA_GROUP_ID: cg-neo4j
-      KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps
+      KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps,stix.mitre
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: skyfall2026
