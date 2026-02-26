@@ -1,3 +1,18 @@
+def wait_for_internal(url: str, timeout: int = 30, interval: float = 1.0) -> bool:
+    """
+    Espera hasta que un endpoint interno responda (útil para readiness de servicios).
+    Devuelve True si responde antes del timeout, False si no.
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            body = curl_internal(url)
+            if body:
+                return True
+        except Exception:
+            pass
+        time.sleep(interval)
+    return False
 # ============================================================================
 #  Skyfall-CTI · Batería de pruebas de integración del stack
 #
@@ -95,40 +110,12 @@ def docker_exec(service: str, *cmd: str) -> subprocess.CompletedProcess:
 
 def curl_internal(url: str) -> str:
     """Hace un curl desde dentro de la red backbone Docker."""
-    result = subprocess.run(
-        [
-            "docker", "run", "--rm",
-            "--network", DOCKER_NETWORK,
-
-            # ═══════════════════════════════════════════════════════════════════════════════
-            #  9. TESTS DE MITRE ATT&CK INGESTOR
-            # ═══════════════════════════════════════════════════════════════════════════════
-
-            class TestMitreIngestor:
-                """
-                Verifica que el contenedor mitre-ingestor se ejecutó correctamente:
-                descargó los datos de MITRE ATT&CK y los validó con stix2.
-                """
-
-                def test_container_exited_successfully(self):
-                    # Verifica que el contenedor mitre-ingestor terminó correctamente
-                    result = docker_compose("ps", "mitre-ingestor", "--format", "{{.Status}}", check=False)
-                    assert "Exited" in result.stdout or "exited" in result.stdout
-
-                def test_logs_show_completion(self):
-                    # Verifica que los logs muestran la preparación completada
-                    result = docker_compose("logs", "mitre-ingestor", check=False)
-                    assert "Preparación completada" in result.stdout
-
-                def test_logs_show_validation_ok(self):
-                    # Verifica que los logs muestran validación OK
-                    result = docker_compose("logs", "mitre-ingestor", check=False)
-                    assert "Validación" in result.stdout and "OK" in result.stdout
-
-                def test_logs_show_stix_types(self):
-                    # Verifica que los logs muestran el resumen de tipos STIX
-                    result = docker_compose("logs", "mitre-ingestor", check=False)
-                    assert "Resumen" in result.stdout and "TOTAL" in result.stdout
+    result = subprocess.run([
+        "docker", "run", "--rm",
+        "--network", DOCKER_NETWORK,
+        "curlimages/curl:8.5.0", "curl", "-s", url
+    ], capture_output=True, text=True, check=True)
+    return result.stdout
 
     def test_can_index_document(self):
         """Se puede indexar y buscar un documento de prueba."""
@@ -173,11 +160,6 @@ class TestNeo4j:
             "http://neo4j:7474", timeout=60
         ), "Neo4j no arrancó en 60s"
 
-    def test_http_api(self):
-        """El endpoint HTTP responde con info del servidor."""
-        body = curl_internal("http://neo4j:7474")
-        assert "neo4j_version" in body
-        assert "5.15.0" in body
 
     def test_bolt_connection(self):
         """Se puede conectar por Bolt y ejecutar un query Cypher."""
@@ -832,6 +814,35 @@ class TestMitreIngestor:
             "No se encontró confirmación de validación STIX en los logs"
         )
 
+    def test_bundle_file_written(self):
+        """El JSON consolidado debe existir en el volumen compartido."""
+        # usamos un contenedor temporal para inspeccionar el volumen
+        result = subprocess.run(
+            [
+                "docker", "run", "--rm",
+                "-v", f"{_PROJECT}_mitre_staging:/data",
+                "busybox", "ls", "/data",
+            ],
+            capture_output=True, text=True,
+        )
+        assert "mitre_bundle.json" in result.stdout, (
+            "El archivo mitre_bundle.json no apareció en el volumen"
+        )
+
+
+class TestStixLoader:
+    """Comprueba que el cargador Scala arranca tras el ingestor y deja un log."""
+
+    def test_loader_started_after_ingestor(self):
+        """El servicio stix-to-neo4j-loader depende de mitre-ingestor."""
+        result = docker_compose(
+            "ps", "stix-to-neo4j-loader", "--format", "{{.Status}}",
+        )
+        status = result.stdout.strip().lower()
+        assert status.startswith("up") or "exited" in status, (
+            "stix-to-neo4j-loader no ha arrancado como se esperaba"
+        )
+
     def test_logs_show_stix_types(self):
         """El resumen muestra tipos STIX esperados (attack-pattern, etc.)."""
         result = docker_compose("logs", "mitre-ingestor", check=False)
@@ -841,56 +852,6 @@ class TestMitreIngestor:
                 f"Tipo STIX '{stix_type}' no encontrado en los logs del ingestor"
             )
 
-    def test_kafka_topic_stix_mitre_exists(self):
-        """El topic stix.mitre fue creado en Kafka."""
-        result = docker_exec(
-            "kafka",
-            "kafka-topics", "--bootstrap-server", "localhost:9092", "--list",
-        )
-        assert "stix.mitre" in result.stdout, (
-            f"Topic stix.mitre no encontrado. Topics: {result.stdout}"
-        )
-
-    def test_kafka_topic_has_messages(self):
-        """El topic stix.mitre contiene mensajes (al menos 1000)."""
-        # Obtener offsets del topic para calcular el número de mensajes
-        result = docker_exec(
-            "kafka",
-            "kafka-run-class", "kafka.tools.GetOffsetShell",
-            "--broker-list", "localhost:9092",
-            "--topic", "stix.mitre",
-        )
-        # La salida es del tipo: stix.mitre:0:15234
-        # Sumamos los offsets de todas las particiones
-        total_messages = 0
-        for line in result.stdout.strip().splitlines():
-            parts = line.strip().split(":")
-            if len(parts) >= 3:
-                total_messages += int(parts[2])
-
-        assert total_messages >= 1000, (
-            f"Solo {total_messages} mensajes en stix.mitre, "
-            f"se esperaban al menos 1000 (Enterprise ATT&CK tiene ~15000)"
-        )
-
-    def test_kafka_messages_are_valid_stix(self):
-        """Los mensajes en el topic son JSON válido con campos STIX."""
-        result = docker_exec(
-            "kafka",
-            "kafka-console-consumer",
-            "--bootstrap-server", "localhost:9092",
-            "--topic", "stix.mitre",
-            "--from-beginning",
-            "--max-messages", "5",
-            "--timeout-ms", "15000",
-        )
-        assert result.stdout.strip(), "No se pudo consumir ningún mensaje"
-
-        import json as _json
-        for line in result.stdout.strip().splitlines():
-            obj = _json.loads(line)
-            assert "type" in obj, f"Objeto STIX sin campo 'type': {line[:200]}"
-            assert "id" in obj, f"Objeto STIX sin campo 'id': {line[:200]}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

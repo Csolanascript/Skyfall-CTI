@@ -45,9 +45,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build all custom services
+      - name: Build all custom services (quiet)
         working-directory: deployment
-        run: docker compose build --parallel
+        run: docker compose build --parallel > /dev/null
 
   # ─────────────────────────────────────────────────────────────────────────
   #  3. Tests de integración del stack completo
@@ -77,9 +77,9 @@ jobs:
         working-directory: deployment
         run: docker compose pull --quiet
 
-      - name: Build & start stack
+      - name: Build & start stack (quiet)
         working-directory: deployment
-        run: docker compose up -d --build --remove-orphans
+        run: docker compose up -d --build --remove-orphans > /dev/null
 
       - name: Wait for services to initialize
         run: |
@@ -99,14 +99,14 @@ jobs:
           echo "=== CONTAINER STATUS ==="
           docker compose ps -a
           echo ""
-          echo "=== LOGS (last 30 lines per service) ==="
+          echo "=== LOGS (last 5 lines per service) ==="
           for svc in $(docker compose config --services); do
             echo "--- $svc ---"
-            docker compose logs "$svc" --tail 30
+            docker compose logs "$svc" --tail 5
             echo ""
           done
 
-      - name: Teardown
+      - name: Teardown (quiet)
         if: always()
         working-directory: deployment
-        run: docker compose down -v --remove-orphans
+        run: docker compose down --remove-orphans --volumes > /dev/null

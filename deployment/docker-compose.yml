@@ -59,17 +59,24 @@ services:
 
   # --- Neo4j: Knowledge Graph STIX 2.1 ---
   neo4j:
-    image: neo4j:5.15.0
+    image: neo4j:enterprise
+    container_name: deployment-neo4j-1
     ports:
-      - "7474:7474"                   # Browser
-      - "7687:7687"                   # Bolt
+      - "7474:7474"                   # HTTP Browser
+      - "7687:7687"                   # Bolt / Bloom
     environment:
-      NEO4J_AUTH: neo4j/skyfall2026
-      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_AUTH: ${NEO4J_AUTH}
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: ${NEO4J_ACCEPT_LICENSE_AGREEMENT}
+      NEO4J_PLUGINS: ${NEO4J_PLUGINS}
+      NEO4J_server_bolt_advertised__address: ${NEO4J_server_bolt_advertised__address}
+      NEO4J_server_bolt_listen__address: ${NEO4J_server_bolt_listen__address}
+      NEO4J_server_ssl_policy_bolt_enabled: ${NEO4J_server_ssl_policy_bolt_enabled}
+      NEO4J_server_config_strict__validation_enabled: ${NEO4J_server_config_strict__validation_enabled}
     volumes:
       - neo4j_data:/data
     networks:
       - skyfall_backbone
+      - skyfall_public
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  3. ORQUESTACIÓN NO-CODE  —  n8n
@@ -86,13 +93,13 @@ services:
     environment:
       GENERIC_TIMEZONE: Europe/Madrid
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}
-      N8N_DEFAULT_USER_EMAIL: ${N8N_DEFAULT_USER_EMAIL:-admin@skyfall.local}
-      N8N_DEFAULT_USER_PASSWORD: ${N8N_DEFAULT_USER_PASSWORD:-}
+      N8N_DEFAULT_USER_EMAIL: ${N8N_DEFAULT_USER_EMAIL}
+      N8N_DEFAULT_USER_PASSWORD: ${N8N_DEFAULT_USER_PASSWORD}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       N8N_KAFKA_BROKER: kafka:29092
       INTELOWL_URL: http://intelowl:8001
-      INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
-      GROK_API_KEY: ${GROK_API_KEY:-}
+      INTELOWL_API_KEY: ${INTELOWL_API_KEY}
+      GROK_API_KEY: ${GROK_API_KEY}
       GROK_API_URL: https://api.x.ai/v1
     volumes:
       - n8n_data:/home/node/.n8n
@@ -112,8 +119,8 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       N8N_WEBHOOK_URL: http://n8n:5678/webhook/telegram
-      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
-      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
       TELEGRAM_SESSION_NAME: skyfall_bot
     volumes:
       - telegram_sessions:/app/sessions
@@ -130,11 +137,13 @@ services:
     build: ../services/mitre-ingestor
     environment:
       PYTHONUNBUFFERED: "1"
-      KAFKA_BROKER: kafka:29092
-      KAFKA_TOPIC: stix.mitre
+      RUN_MITRE_INGESTOR: "0"            # dispara el proceso en el arranque
       MITRE_DOMAINS: "enterprise-attack,mobile-attack,ics-attack"
+    volumes:
+      - mitre_staging:/data                # aquí escribe el bundle JSON
     depends_on:
       - kafka
+      - neo4j
     networks:
       - skyfall_backbone
       - skyfall_public
@@ -150,8 +159,8 @@ services:
       KAFKA_BROKER: kafka:29092
       KAFKA_TOPIC: stix.dumps
       INTELOWL_URL: http://intelowl:8001
-      INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      INTELOWL_API_KEY: ${INTELOWL_API_KEY}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
       SCRAPE_INTERVAL_SECONDS: "3600"
     depends_on:
       - kafka
@@ -186,7 +195,7 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       MONGODB_URI_PROD: mongodb://kevin-mongo:27017/
-      API_KEY: ${NVD_API_KEY:-}
+      API_KEY: ${NVD_API_KEY}
     depends_on:
       - kevin-mongo
     networks:
@@ -203,7 +212,7 @@ services:
       MONGODB_URI_PROD: mongodb://kevin-mongo:27017/
       REDIS_IP: kevin-redis
       REDIS_PORT: "6379"
-      API_KEY: ${NVD_API_KEY:-}
+      API_KEY: ${NVD_API_KEY}
     depends_on:
       - kevin-mongo
       - kevin-redis
@@ -228,7 +237,7 @@ services:
       - intelowl_pg_data:/var/lib/postgresql/data/
     environment:
       POSTGRES_USER: intelowl
-      POSTGRES_PASSWORD: ${INTELOWL_DB_PASSWORD:-intelowl}
+      POSTGRES_PASSWORD: ${INTELOWL_DB_PASSWORD}
       POSTGRES_DB: intel_owl_db
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
@@ -266,11 +275,11 @@ services:
       - "8001"
     environment: &intelowl-env
       # ── Secrets / DB ──
-      DJANGO_SECRET: ${INTELOWL_DJANGO_SECRET:-changeme_in_production}
+      DJANGO_SECRET: ${INTELOWL_DJANGO_SECRET}
       DB_HOST: intelowl-db
       DB_PORT: "5432"
       DB_USER: intelowl
-      DB_PASSWORD: ${INTELOWL_DB_PASSWORD:-intelowl}
+      DB_PASSWORD: ${INTELOWL_DB_PASSWORD}
       DB_NAME: intel_owl_db
       DB_SSL: "False"
       # ── Broker / WebSockets (Redis) ──
@@ -374,7 +383,7 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       INTELOWL_URL: http://intelowl:8001
-      INTELOWL_API_KEY: ${INTELOWL_API_KEY:-}
+      INTELOWL_API_KEY: ${INTELOWL_API_KEY}
       KAFKA_BROKER: kafka:29092
       KAFKA_GROUP_ID: cg-intelowl-client
       KAFKA_INPUT_TOPICS: enrichment.requests
@@ -418,9 +427,9 @@ services:
       KAFKA_BROKER: kafka:29092
       KAFKA_GROUP_ID: cg-neo4j
       KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps,stix.mitre
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: skyfall2026
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
     depends_on:
       - kafka
       - neo4j
@@ -439,9 +448,9 @@ services:
       - "8003:8000"
     environment:
       PYTHONUNBUFFERED: "1"
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: skyfall2026
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       ELASTICSEARCH_URL: http://elasticsearch:9200
     depends_on:
       - neo4j
@@ -462,9 +471,9 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       ELASTICSEARCH_URL: http://elasticsearch:9200
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: skyfall2026
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       CORRELATION_URL: http://correlation-engine:8000
     depends_on:
       - elasticsearch
@@ -500,3 +509,4 @@ volumes:
   intelowl_static_content:
   intelowl_shared_files:
   kevin_mongo_data:
+  mitre_staging:
