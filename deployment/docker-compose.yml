@@ -137,7 +137,7 @@ services:
     build: ../services/mitre-ingestor
     environment:
       PYTHONUNBUFFERED: "1"
-      RUN_MITRE_INGESTOR: "0"            # dispara el proceso en el arranque
+      RUN_MITRE_INGESTOR: ${RUN_MITRE_INGESTOR}
       MITRE_DOMAINS: "enterprise-attack,mobile-attack,ics-attack"
     volumes:
       - mitre_staging:/data                # aquí escribe el bundle JSON
