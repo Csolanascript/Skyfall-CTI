@@ -52,6 +52,7 @@ PORTS = {
     "intelowl_client": 8004,
     "mcp_server": 8000,
     "frontend": 3000,
+    "kibana": 5601,
 }
 
 # Servicios que deben estar "Up" (todos)
@@ -78,6 +79,8 @@ ALL_SERVICES = [
     "correlation-engine",
     "mcp-server",
     "frontend",
+    "kibana",
+    "elastic-agent",
 ]
 
 # Workers Python sin puerto expuesto (se verifican via docker exec)
@@ -852,3 +855,73 @@ class TestResilience:
             "--format", "{{.Status}}",
         )
         assert "Up" in result.stdout
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  11. TESTS DE VISUALIZACIÓN Y AGENTES (Kibana & Elastic Agent)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestKibana:
+    """Verifica que el panel de visualización esté operativo."""
+
+    def test_kibana_status(self):
+        """Kibana responde con estado 200 en su API de status."""
+        # Nota: Kibana tarda en arrancar, se recomienda un timeout generoso
+        r = requests.get(f"http://localhost:{PORTS['kibana']}/api/status", timeout=20)
+        assert r.status_code == 200
+        assert "v8.12.0" in r.text or "version" in r.json()
+
+    def test_kibana_ui_accessible(self):
+        """El frontend de Kibana carga correctamente."""
+        r = requests.get(f"http://localhost:{PORTS['kibana']}/app/home", timeout=10)
+        assert r.status_code == 200
+
+
+class TestElasticAgent:
+    """Verifica el Agente que procesa la integración ti_custom."""
+
+    def test_agent_process_running(self):
+        """El proceso del agente está activo dentro del contenedor."""
+        result = docker_exec("elastic-agent", "elastic-agent", "status")
+        # El status debe indicar que está 'Healthy' o al menos ejecutándose
+        assert result.returncode == 0
+        assert "Status: HEALTHY" in result.stdout or "Running" in result.stdout
+
+    def test_agent_can_reach_kibana(self):
+        """El agente tiene conectividad con Fleet en Kibana."""
+        result = docker_exec("elastic-agent", "curl", "-s", "-I", "http://kibana:5601/api/status")
+        assert "200" in result.stdout
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  12. TEST DE INTEGRACIÓN: FLUJO DROPZONE (EL PUENTE)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDropzoneFlow:
+    """
+    Verifica el flujo crítico: 
+    Python Consumer escribe JSON -> Volumen compartido -> Elastic Agent ve archivo.
+    """
+
+    def test_shared_volume_writable(self):
+        """El consumidor puede escribir archivos en el volumen compartido."""
+        test_file = "/app/dropzone/pytest_canary.json"
+        content = '{"test": "dropzone_verification"}'
+        
+        # Intentar escribir desde el consumidor
+        result = docker_exec(
+            "consumer-elastic", 
+            "sh", "-c", f"echo '{content}' > {test_file}"
+        )
+        assert result.returncode == 0
+
+        # Verificar que el Agente puede verlo (lectura compartida)
+        result_agent = docker_exec(
+            "elastic-agent", 
+            "ls", "/app/dropzone/pytest_canary.json"
+        )
+        assert result_agent.returncode == 0
+        
+        # Limpieza
+        docker_exec("consumer-elastic", "rm", test_file)
+

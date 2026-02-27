@@ -1,0 +1,900 @@
+% Plantilla TFG/TFM
+\documentclass[a4paper,11pt]{report}
+
+% === PAQUETES BÁSICOS ===
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,english]{babel}
+\usepackage{csquotes}
+
+% === TIPOGRAFÍA ===
+\usepackage{carlito}
+\usepackage{anyfontsize}
+\renewcommand{\familydefault}{\sfdefault}
+
+% === GEOMETRÍA Y MÁRGENES ===
+\usepackage{geometry}
+\geometry{
+  a4paper,
+  left=2.5cm,
+  right=2.5cm,
+  top=3cm,
+  bottom=3cm,
+  headheight=14pt
+}
+
+% === GRÁFICOS Y COLOR ===
+\usepackage{graphicx}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{subcaption}
+
+% Color de la portada
+\definecolor{tfgblue}{RGB}{51,102,153}
+
+% === TABLAS ===
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+
+% === MATEMÁTICAS ===
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+
+% === CÓDIGO FUENTE ===
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  stringstyle=\color{red},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  stepnumber=1,
+  numbersep=8pt,
+  backgroundcolor=\color{gray!10},
+  frame=single,
+  rulecolor=\color{black!30},
+  breaklines=true,
+  captionpos=b,
+  tabsize=2,
+  showstringspaces=false
+}
+
+% === ALGORITMOS ===
+\usepackage[ruled,vlined,linesnumbered,spanish]{algorithm2e}
+\SetAlgorithmName{Algoritmo}{algoritmo}{Índice de algoritmos}
+
+% === FORMATO DE CAPÍTULOS Y SECCIONES ===
+\usepackage{titlesec}
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries}{\chaptertitlename\ \thechapter}{20pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{-20pt}{40pt}
+
+% === BIBLIOGRAFÍA (IEEE) ===
+\usepackage[
+  style=ieee,
+  citestyle=numeric-comp,
+  sorting=none,
+  backend=biber
+]{biblatex}
+\addbibresource{referencias.bib}
+
+% Configuración para mejor manejo de URLs en bibliografía
+\setcounter{biburlnumpenalty}{9000}
+\setcounter{biburlucpenalty}{9000}
+\setcounter{biburllcpenalty}{9000}
+
+% === HIPERVÍNCULOS ===
+\usepackage[pdfencoding=auto]{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  citecolor=green!50!black,
+  urlcolor=blue!70!black,
+  pdftitle={Título del trabajo},
+  pdfauthor={Nombre y apellidos del autor},
+  pdfsubject={Trabajo Fin de Grado/Máster},
+  pdfkeywords={palabra clave 1, palabra clave 2, palabra clave 3},
+  bookmarksnumbered=true,
+  bookmarksopen=true,
+  bookmarksopenlevel=1
+}
+
+% === REFERENCIAS CRUZADAS INTELIGENTES ===
+\usepackage[spanish,capitalize]{cleveref}
+% Configuración de nombres en español para cleveref
+\crefname{figure}{figura}{figuras}
+\Crefname{figure}{Figura}{Figuras}
+\crefname{table}{tabla}{tablas}
+\Crefname{table}{Tabla}{Tablas}
+\crefname{equation}{ecuación}{ecuaciones}
+\Crefname{equation}{Ecuación}{Ecuaciones}
+\crefname{chapter}{capítulo}{capítulos}
+\Crefname{chapter}{Capítulo}{Capítulos}
+\crefname{section}{sección}{secciones}
+\Crefname{section}{Sección}{Secciones}
+\crefname{listing}{listado}{listados}
+\Crefname{listing}{Listado}{Listados}
+\crefname{algorithm}{algoritmo}{algoritmos}
+\Crefname{algorithm}{Algoritmo}{Algoritmos}
+
+% === ENCABEZADOS Y PIES DE PÁGINA ===
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{} % Limpiar encabezados y pies
+\fancyhead[LE,RO]{\thepage} % Número de página en exterior
+\fancyhead[RE]{\leftmark} % Nombre del capítulo en páginas pares
+\fancyhead[LO]{\rightmark} % Nombre de la sección en páginas impares
+\renewcommand{\headrulewidth}{0.4pt} % Línea en el encabezado
+\renewcommand{\footrulewidth}{0pt} % Sin línea en el pie
+
+% Estilo para páginas de inicio de capítulo
+\fancypagestyle{plain}{
+  \fancyhf{}
+  \fancyfoot[C]{\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+
+% === ANEXOS ===
+\usepackage[toc,page]{appendix}
+\renewcommand{\appendixtocname}{Anexos}
+\renewcommand{\appendixpagename}{Anexos}
+
+% === GLOSARIOS Y ACRÓNIMOS ===
+\usepackage[acronym,toc,numberedsection=autolabel]{glossaries}
+\makeglossaries
+
+% Definición de algunos ejemplos de acrónimos (el usuario puede editarlos)
+\newacronym{tfg}{TFG}{Trabajo Fin de Grado}
+\newacronym{tfm}{TFM}{Trabajo Fin de Máster}
+\newacronym{unizar}{UNIZAR}{Universidad de Zaragoza}
+
+% Definición de algunos ejemplos de términos del glosario
+\newglossaryentry{latex}{
+  name=LaTeX,
+  description={Sistema de composición de textos orientado a la creación de documentos científicos y técnicos de alta calidad tipográfica}
+}
+
+\newglossaryentry{pdf}{
+  name=PDF,
+  description={Formato de archivo portátil (Portable Document Format) desarrollado por Adobe para representar documentos de manera independiente del software y hardware}
+}
+
+% === COMANDOS PERSONALIZADOS ===
+\usepackage{xspace}
+\newcommand{\ie}{i.e.\xspace}
+\newcommand{\eg}{e.g.\xspace}
+\newcommand{\etal}{et al.\xspace}
+
+% === OTROS ===
+\usepackage{lipsum}
+\usepackage{parskip}
+
+% ============================================================
+% INICIO DEL DOCUMENTO
+% ============================================================
+
+\begin{document}
+
+% ============================================================
+% PORTADA (editable)
+% ============================================================
+
+\begin{titlepage}
+\thispagestyle{empty}
+\centering
+
+% Geometría específica para la portada
+\newgeometry{top=3.24cm, left=2.81cm, right=2.81cm, bottom=2cm}
+
+% Logo de la Universidad
+\includegraphics[height=2.4cm]{img/logo_uz.png}\\[1.41cm]
+
+% Caja con el tipo de trabajo
+\setlength{\fboxrule}{0.96pt}
+\setlength{\fboxsep}{4pt}
+\fcolorbox{tfgblue}{white}{%
+  \parbox{423.94pt}{\centering\fontsize{28.18}{34}\selectfont
+    \vspace{6pt}Trabajo Fin de Grado\vspace{0pt}
+  }%
+}\\[3.56cm]
+
+% Título del trabajo
+\fontsize{19.99}{24}\selectfont
+Diseño de una plataforma para la gestión de Ciberinteligencia basada en microservicios \\[0.86cm]
+Design of a microservices-based platform for Cyber Threat Intelligence (CTI) management\\[1.76cm]
+
+% Autor/es
+\fontsize{12.04}{14.5}\selectfont
+Autor\\[0.63cm]
+\fontsize{18.07}{22}\selectfont
+Carlos Solana Melero\\[1.66cm]
+
+% Director/es
+\fontsize{12.04}{14.5}\selectfont
+Director/es\\[0.58cm]
+\fontsize{13.97}{17}\selectfont
+Alfredo Ramírez/Ricardo Julio Rodríguez\\[0.78cm]
+
+% Titulación
+\fontsize{12.04}{14.5}\selectfont
+Titulación del autor\\[0.49cm]
+\fontsize{13.97}{17}\selectfont
+Grado en Ingeniería Informática\\[0.78cm]
+
+% Facultad/Escuela y año
+\fontsize{12.04}{14.5}\selectfont
+EINA\\
+2026
+
+\vfill
+
+% Restaurar geometría normal
+\restoregeometry
+\end{titlepage}
+
+% ============================================================
+% PÁGINAS PRELIMINARES (numeración romana)
+% ============================================================
+
+\pagenumbering{Roman}
+\setcounter{page}{1}
+
+% ============================================================
+% AGRADECIMIENTOS (opcional - comentar o descomentar según necesidad)
+% ============================================================
+
+% \chapter*{Agradecimientos}
+% \addcontentsline{toc}{chapter}{Agradecimientos}
+% 
+% En esta sección puedes incluir agradecimientos a las personas e instituciones que han contribuido a la realización de este trabajo.
+% 
+% \lipsum[1]
+
+% ============================================================
+% RESUMEN
+% ============================================================
+
+\chapter*{Resumen}
+\addcontentsline{toc}{chapter}{Resumen}
+
+\section*{Título del trabajo}
+Título del trabajo
+
+\section*{English title}
+English title
+
+\section*{RESUMEN}
+
+\selectlanguage{spanish}
+\lipsum[1]
+
+\vspace{1cm}
+\noindent\textbf{Palabras clave:} palabra clave 1, palabra clave 2, palabra clave 3, palabra clave 4, palabra clave 5
+
+\vspace{1cm}
+
+\section*{ABSTRACT}
+
+\selectlanguage{english}
+\lipsum[2]
+
+\vspace{1cm}
+\noindent\textbf{Keywords:} keyword 1, keyword 2, keyword 3, keyword 4, keyword 5
+
+\selectlanguage{spanish}
+
+% ============================================================
+% ÍNDICES
+% ============================================================
+
+\clearpage
+\tableofcontents
+
+\clearpage
+\listoffigures
+
+\clearpage
+\listoftables
+
+\clearpage
+\lstlistoflistings
+
+% ============================================================
+% GLOSARIOS Y ACRÓNIMOS (opcional - comentar si no se utilizan)
+% ============================================================
+
+% Descomenta las siguientes líneas si usas glosarios y acrónimos en tu documento
+% \clearpage
+% \printglossary[type=\acronymtype,title=Lista de acrónimos]
+% 
+% \clearpage
+% \printglossary[title=Glosario]
+
+% ============================================================
+% CUERPO DEL DOCUMENTO (numeración arábiga)
+% ============================================================
+
+\clearpage
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+% ============================================================
+% CAPÍTULO 1: INTRODUCCIÓN
+% ============================================================
+
+\chapter{Introducción}
+\label{chap:introduccion}
+
+\lipsum[1]
+
+\section{Objetivo y alcance}
+
+\lipsum[2]
+
+\section{Contexto del trabajo}
+
+\lipsum[3]
+
+\section{Métodos, herramientas y estado del arte}
+
+\lipsum[4]
+
+\section{Estructura de la memoria}
+
+\lipsum[5]
+
+% ============================================================
+% CAPÍTULO 2: METODOLOGÍA
+% ============================================================
+
+\chapter{Metodología}
+\label{chap:metodologia}
+
+\lipsum[6]
+
+\section{Marco metodológico}
+
+\lipsum[7]
+
+\section{Procedimientos}
+
+\lipsum[8]
+
+% ============================================================
+% CAPÍTULO 3: DESARROLLO
+% ============================================================
+
+\chapter{Desarrollo}
+\label{chap:desarrollo}
+
+\lipsum[9]
+
+\section{Descripción del trabajo}
+
+\lipsum[10]
+
+\section{Detalle}
+
+\lipsum[11]
+
+\section{Consideraciones adicionales}
+
+\lipsum[12]
+
+% ============================================================
+% CAPÍTULO 4: RESULTADOS
+% ============================================================
+
+\chapter{Resultados}
+\label{chap:resultados}
+
+\lipsum[13]
+
+\section{Evaluación}
+
+\lipsum[14]
+
+\section{Análisis de resultados}
+
+\lipsum[15]
+
+\section{Comparación con trabajos relacionados}
+
+\lipsum[16]
+
+% ============================================================
+% CAPÍTULO 5: CONCLUSIONES
+% ============================================================
+
+\chapter{Conclusiones}
+\label{chap:conclusiones}
+
+\lipsum[17]
+
+\section{Resumen del trabajo}
+
+\lipsum[18]
+
+\section{Cumplimiento de objetivos}
+
+\lipsum[19]
+
+\section{Aportaciones propias}
+
+\lipsum[20]
+
+\section{Valoración crítica}
+
+\lipsum[21]
+
+\section{Trabajos futuros}
+
+\lipsum[22]
+
+\section{Valoración personal}
+
+\lipsum[23]
+
+% ============================================================
+% BIBLIOGRAFÍA
+% ============================================================
+
+\clearpage
+\printbibliography[heading=bibintoc,title={Referencias}]
+
+% ============================================================
+% ANEXOS
+% ============================================================
+
+\begin{appendices}
+
+\chapter{Material complementario}
+
+\lipsum[24]
+
+\section{Descripción general}
+
+\lipsum[25]
+
+\section{Información adicional}
+
+\lipsum[26]
+
+\chapter{Documentación adicional}
+
+\lipsum[27]
+
+\section{Información complementaria}
+
+\lipsum[28]
+
+\chapter{Ejemplos de uso de \LaTeX}
+\label{app:latex}
+
+Este anexo contiene ejemplos de los principales elementos de \LaTeX{} utilizados en documentos académicos. Sirve como referencia rápida para usuarios de esta plantilla.
+
+\section{Ecuaciones matemáticas}
+
+\subsection{Ecuaciones en línea y display}
+
+Las ecuaciones pueden aparecer en línea como $E = mc^2$ o en modo display:
+
+\[
+\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}
+\]
+
+\subsection{Ecuaciones numeradas}
+
+Para ecuaciones numeradas se utiliza el entorno \texttt{equation}:
+
+\begin{equation}
+  \label{eq:ejemplo}
+  y = mx + b
+\end{equation}
+
+La ecuación~\eqref{eq:ejemplo} representa un ejemplo de ecuación numerada que puede ser referenciada en el texto.
+
+\subsection{Sistemas de ecuaciones}
+
+Para sistemas de ecuaciones se puede usar \texttt{align}:
+
+\begin{align}
+  a_1 x + b_1 y &= c_1 \label{eq:sistema1} \\
+  a_2 x + b_2 y &= c_2 \label{eq:sistema2} \\
+  a_3 x + b_3 y &= c_3 \label{eq:sistema3}
+\end{align}
+
+Las ecuaciones~\eqref{eq:sistema1}--\eqref{eq:sistema3} muestran cómo alinear múltiples ecuaciones.
+
+\section{Tablas}
+
+\subsection{Tabla simple}
+
+La tabla~\ref{tab:simple} muestra un ejemplo básico usando el paquete \texttt{booktabs}.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Comparación de opciones}
+  \label{tab:simple}
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Opción} & \textbf{Métrica 1} & \textbf{Métrica 2} \\
+    \midrule
+    Opción A & Alto & Baja \\
+    Opción B & Medio & Alta \\
+    Opción C & Variable & Media \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Tabla con multirow y multicolumn}
+
+La tabla~\ref{tab:compleja} ilustra el uso de celdas combinadas con \texttt{multirow} y \texttt{multicolumn}.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Ejemplo de tabla con celdas combinadas}
+  \label{tab:compleja}
+  \begin{tabular}{lcccc}
+    \toprule
+    \multirow{2}{*}{\textbf{Configuración}} & \multicolumn{2}{c}{\textbf{Medida 1}} & \multicolumn{2}{c}{\textbf{Medida 2}} \\
+    \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+    & Media & Desv. Est. & Media & Desv. Est. \\
+    \midrule
+    Config A & 45.2 & 3.1 & 1200 & 85 \\
+    Config B & 38.7 & 2.8 & 1450 & 92 \\
+    Config C & 52.1 & 4.2 & 980 & 73 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Tabla con datos de resultados}
+
+La tabla~\ref{tab:resultados} muestra un ejemplo de tabla de resultados experimentales.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Resultados bajo diferentes escenarios}
+  \label{tab:resultados}
+  \begin{tabular}{lccccc}
+    \toprule
+    \multirow{2}{*}{\textbf{Escenario}} & \textbf{Variable 1} & \textbf{Variable 2} & \textbf{Variable 3} & \textbf{Variable 4} & \textbf{Variable 5} \\
+    & \textbf{(unidades)} & \textbf{(unidades)} & \textbf{(unidades)} & \textbf{(unidades)} & \textbf{(\%)} \\
+    \midrule
+    Escenario A & 50 & 10 & 450 & 35 & 0.1 \\
+    Escenario B & 200 & 15 & 1650 & 78 & 0.3 \\
+    Escenario C & 500 & 20 & 3200 & 142 & 1.2 \\
+    Escenario D & 1000 & 5 & 4500 & 310 & 3.5 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Figuras e imágenes}
+
+\subsection{Figura simple}
+
+La figura~\ref{fig:ejemplo1} muestra un ejemplo básico de figura con caption.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.7\textwidth]{example-image-a}
+  \caption{Ejemplo de figura simple}
+  \label{fig:ejemplo1}
+\end{figure}
+
+\subsection{Subfiguras}
+
+La figura~\ref{fig:ejemplo2} presenta un ejemplo de subfiguras usando el paquete \texttt{subcaption}.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{subfigure}[b]{0.45\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{example-image-b}
+    \caption{Subfigura A}
+    \label{fig:ejemplo2a}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[b]{0.45\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{example-image-c}
+    \caption{Subfigura B}
+    \label{fig:ejemplo2b}
+  \end{subfigure}
+  \caption{Ejemplo de figura con subfiguras}
+  \label{fig:ejemplo2}
+\end{figure}
+
+Las subfiguras~\ref{fig:ejemplo2a} y~\ref{fig:ejemplo2b} pueden ser referenciadas individualmente.
+
+\section{Código y contenido estructurado}
+
+\subsection{Listado de texto estructurado}
+
+El listado~\ref{lst:ejemplo} muestra cómo usar el paquete \texttt{listings} para contenido estructurado.
+
+\begin{lstlisting}[caption={Ejemplo de contenido estructurado}, label=lst:ejemplo]
+Elemento 1: Descripcion del elemento 1
+  Subelemento 1.1: Detalle del subelemento
+  Subelemento 1.2: Detalle del subelemento
+    
+Elemento 2: Descripcion del elemento 2
+  Subelemento 2.1: Detalle del subelemento
+  Subelemento 2.2: Detalle del subelemento
+  Subelemento 2.3: Detalle del subelemento
+    
+Elemento 3: Descripcion del elemento 3
+  Subelemento 3.1: Detalle del subelemento
+    
+Proceso:
+  Paso 1 -> Paso 2 -> Paso 3
+\end{lstlisting}
+
+\section{Algoritmos y procedimientos}
+
+\subsection{Algoritmo de ejemplo}
+
+El algoritmo~\ref{alg:ejemplo} muestra cómo usar el paquete \texttt{algorithm2e} para describir procedimientos.
+
+\begin{algorithm}[htbp]
+  \caption{Ejemplo de procedimiento genérico}
+  \label{alg:ejemplo}
+  \KwIn{Entrada: conjunto de elementos $L = \{e_1, e_2, \ldots, e_n\}$, parámetro $p$}
+  \KwOut{Salida: elemento seleccionado $e_i$}
+  
+  \BlankLine
+  $minValor \gets \infty$\;
+  $elementoSeleccionado \gets null$\;
+  
+  \BlankLine
+  \For{cada elemento $e \in L$}{
+    \If{$e.cumpleCondicion()$}{
+      $valor \gets e.calcularValor()$\;
+      \If{$valor < minValor$}{
+        $minValor \gets valor$\;
+        $elementoSeleccionado \gets e$\;
+      }
+    }
+  }
+  
+  \BlankLine
+  \eIf{$elementoSeleccionado \neq null$}{
+    $elementoSeleccionado.aplicar(p)$\;
+    \Return{$elementoSeleccionado$}\;
+  }{
+    \Return{ERROR: No hay elementos válidos}\;
+  }
+\end{algorithm}
+
+\section{Referencias cruzadas y citas bibliográficas}
+
+\subsection{Referencias cruzadas}
+
+Este anexo demuestra el uso de referencias cruzadas a diferentes elementos del documento:
+
+\begin{itemize}
+  \item Ecuaciones: La ecuación~\eqref{eq:ejemplo} muestra una referencia con \texttt{\textbackslash eqref}
+  \item Tablas: La tabla~\ref{tab:simple} usa \texttt{\textbackslash ref}
+  \item Figuras: La figura~\ref{fig:ejemplo1} también usa \texttt{\textbackslash ref}
+  \item Listados: El listado~\ref{lst:ejemplo} se referencia igual
+  \item Algoritmos: El algoritmo~\ref{alg:ejemplo} se referencia de la misma forma
+\end{itemize}
+
+\subsection{Citas bibliográficas}
+
+\subsubsection{Cita simple}
+
+Para citar una única referencia se usa el comando \texttt{\textbackslash cite}. Por ejemplo: ``Según estudios recientes~\cite{Apellido2020}, se ha demostrado que...''
+
+\subsubsection{Citas múltiples}
+
+Para citar varias referencias juntas se usa \texttt{\textbackslash cites}. Por ejemplo: ``Diversos autores han trabajado en este tema~\cites{Apellido2020,Apellido2021}, demostrando que...''
+
+\subsubsection{Citas con página específica}
+
+Para citar una página concreta se añade el número de página como parámetro opcional. Por ejemplo: ``Como se menciona en el trabajo de Apellido~\cite[][p.~105]{Apellido2021}, es importante considerar...''
+
+\subsubsection{Otras citas de ejemplo}
+
+Se pueden combinar diferentes estilos de citas en el texto:
+
+\begin{itemize}
+  \item Referencias de libros~\cite{Apellido1997}
+  \item Referencias de recursos en línea~\cite{Organizacion2023}
+  \item Referencias de informes técnicos~\cite{Organismo2001}
+  \item Múltiples citas de diferentes tipos~\cites{Apellido1997,Organizacion2023,Organismo2001}
+\end{itemize}
+
+Todas estas citas se gestionan automáticamente con \texttt{biblatex} y \texttt{biber}, generando la lista de referencias al final del documento en formato IEEE.
+
+\subsection{Cambiar el estilo bibliográfico}
+
+Esta plantilla usa el estilo IEEE por defecto. Para cambiar a otro estilo, modifica la línea en el preámbulo:
+
+\begin{lstlisting}[language=TeX, caption={Configuración del estilo bibliográfico}]
+% Estilo actual (IEEE)
+\usepackage[
+  style=ieee,
+  citestyle=numeric-comp,
+  sorting=none,
+  backend=biber
+]{biblatex}
+
+% Ejemplos de otros estilos comunes:
+% APA (Ciencias Sociales)
+% style=apa, citestyle=apa
+
+% Vancouver (Ciencias de la Salud)
+% style=numeric, citestyle=numeric
+
+% Chicago (Humanidades)
+% style=authoryear, citestyle=authoryear
+
+% Alphabetic (Orden alfabetico)
+% style=alphabetic, citestyle=alphabetic
+\end{lstlisting}
+
+Después de cambiar el estilo, recompila el documento con \texttt{latexmk -pdf main.tex} para aplicar los cambios.
+
+\section{Encabezados y pies de página}
+
+Esta plantilla usa el paquete \texttt{fancyhdr} para personalizar los encabezados. La configuración actual muestra:
+
+\begin{itemize}
+  \item Número de página en el margen exterior (derecha en páginas impares, izquierda en pares)
+  \item Nombre del capítulo en páginas pares
+  \item Nombre de la sección en páginas impares
+  \item Línea horizontal separando el encabezado del contenido
+\end{itemize}
+
+Para modificar los encabezados, edita la sección correspondiente en el preámbulo del documento.
+
+\section{Referencias cruzadas inteligentes con cleveref}
+
+Esta plantilla incluye el paquete \texttt{cleveref} que permite referencias cruzadas más inteligentes y automáticas. En lugar de escribir manualmente ``la figura~\textbackslash ref\{fig:ejemplo\}'', puedes usar:
+
+\begin{lstlisting}[language=TeX, caption={Ejemplos de uso de cleveref}]
+% En lugar de: como se muestra en la figura~\ref{fig:ejemplo1}
+% Usa: como se muestra en la \cref{fig:ejemplo1}
+% Resultado: como se muestra en la figura 3.1
+
+% Para mayuscula al inicio de frase:
+% \Cref{fig:ejemplo1} muestra un ejemplo
+% Resultado: Figura 3.1 muestra un ejemplo
+
+% Referencias multiples automaticas:
+% Las \cref{fig:ejemplo1,fig:ejemplo2,tab:simple} muestran...
+% Resultado: Las figuras 3.1, 3.2 y tabla 2.1 muestran...
+\end{lstlisting}
+
+El paquete está configurado para español y reconoce automáticamente figuras, tablas, ecuaciones, capítulos, secciones, listados y algoritmos.
+
+\textbf{Ejemplos de resultado:}
+
+\begin{itemize}
+  \item Como se muestra en la \cref{fig:ejemplo1}... 
+  \item \Cref{fig:ejemplo1} muestra un ejemplo... 
+  \item Las \cref{fig:ejemplo1,fig:ejemplo2,tab:simple} demuestran...
+\end{itemize}
+
+\section{Glosarios y acrónimos}
+
+Esta plantilla incluye soporte para glosarios y listas de acrónimos mediante el paquete \texttt{glossaries}. Para usarlo:
+
+\subsection{Definir acrónimos y términos}
+
+En el preámbulo del documento, define tus acrónimos y términos:
+
+\begin{lstlisting}[language=TeX, caption={Definición de acrónimos y glosario}]
+% Definir un acronimo
+\newacronym{http}{HTTP}{Hypertext Transfer Protocol}
+\newacronym{api}{API}{Application Programming Interface}
+
+% Definir un termino del glosario
+\newglossaryentry{algoritmo}{
+  name=algoritmo,
+  description={Secuencia finita de instrucciones bien definidas 
+    para resolver un problema o realizar una tarea}
+}
+\end{lstlisting}
+
+\subsection{Usar en el texto}
+
+Usa los acrónimos y términos en tu documento:
+
+\begin{lstlisting}[language=TeX, caption={Uso de acrónimos y glosario en el texto}]
+% Primera mencion muestra completo: HTTP (HyperText Transfer Protocol)
+% Siguientes menciones solo muestran: HTTP
+El protocolo \gls{http} permite la transferencia de datos.
+
+% Forzar forma completa
+\acrfull{http}
+
+% Forzar solo acronimo
+\acrshort{http}
+
+% Terminos del glosario
+Un \gls{algoritmo} es fundamental en programacion.
+\end{lstlisting}
+
+\textbf{Ejemplo de resultado:}
+
+Si usas \texttt{\textbackslash gls\{tfg\}} por primera vez en el texto, aparecerá: ``Trabajo Fin de Grado (TFG)''. Las siguientes veces solo mostrará: ``TFG''.
+
+\subsection{Generar las listas}
+
+Las listas de acrónimos y glosario están comentadas por defecto en la sección de índices. Descoméntalas si las usas. Para compilar correctamente con glosarios, usa:
+
+\begin{lstlisting}[language=bash, caption={Compilación con glosarios}]
+latexmk -pdf main.tex
+# O manualmente:
+pdflatex main.tex
+makeglossaries main
+pdflatex main.tex
+\end{lstlisting}
+
+\section{Comandos personalizados útiles}
+
+La plantilla incluye algunos comandos personalizados para abreviaturas comunes:
+
+\begin{lstlisting}[language=TeX, caption={Comandos personalizados disponibles}]
+% i.e. (id est - esto es)
+Varios factores (\ie temperatura y presion) afectan...
+
+% e.g. (exempli gratia - por ejemplo)
+Algunos lenguajes (\eg Python, Java) son muy populares...
+
+% et al. (et alii - y otros)
+Segun Smith \etal [5], se observa que...
+\end{lstlisting}
+
+Estos comandos añaden automaticamente el espaciado correcto despues de la abreviatura. A continuación se muestran ejemplos de uso:
+
+\begin{itemize}
+  \item Varios factores (\ie temperatura y presión) afectan el resultado del experimento.
+  \item Algunos lenguajes (\eg Python, Java) son muy populares en la actualidad.
+  \item Según Smith \etal [1], se observa que estos métodos son efectivos.
+\end{itemize}
+
+\section{Configuración de colores en hipervínculos}
+
+Esta plantilla tiene activados colores sutiles en los hipervínculos por defecto para mejorar la navegación del documento:
+
+\begin{itemize}
+  \item \textbf{Enlaces internos} (capítulos, secciones, figuras, tablas): azul oscuro
+  \item \textbf{Citas bibliográficas}: verde oscuro
+  \item \textbf{URLs externas}: azul
+\end{itemize}
+
+Para desactivar los colores y usar enlaces ocultos, modifica la configuración de \texttt{hyperref} en el preámbulo:
+
+\begin{lstlisting}[language=TeX, caption={Desactivar colores en hipervínculos}]
+\usepackage[hidelinks,pdfencoding=auto]{hyperref}
+\hypersetup{
+  colorlinks=false,
+  % ... resto de opciones ...
+}
+\end{lstlisting}
+
+Para personalizar los colores, ajusta los valores en el preámbulo:
+
+\begin{lstlisting}[language=TeX, caption={Personalizar colores de hipervínculos}]
+\hypersetup{
+  colorlinks=true,
+  linkcolor=red!60!black,      % Enlaces internos en rojo
+  citecolor=orange!70!black,   % Citas en naranja
+  urlcolor=purple,             % URLs en purpura
+  % ... resto de opciones ...
+}
+\end{lstlisting}
+
+\end{appendices}
+
+% ============================================================
+% FIN DEL DOCUMENTO
+% ============================================================
+
+\end{document}
