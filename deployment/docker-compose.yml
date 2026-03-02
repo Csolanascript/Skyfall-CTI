@@ -14,27 +14,33 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
   #  1. INFRAESTRUCTURA DE MENSAJERÍA (KAFKA)
   # ═══════════════════════════════════════════════════════════════════════════
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-    networks:
-      - skyfall_backbone
-
   kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    depends_on:
-      - zookeeper
+    image: confluentinc/cp-kafka:8.0.0
+    container_name: skyfall-kafka
     ports:
       - "9092:9092"
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # --- Configuración de Nodo KRaft ---
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+      
+      # --- Listeners ---
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      
+      # --- Optimización para Desarrollo ---
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_DIRS: '/var/lib/kafka/data'
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     networks:
       - skyfall_backbone
       - skyfall_public
@@ -45,11 +51,14 @@ services:
 
   # --- Elasticsearch: búsqueda semántica, logs, OSINT crudo ----
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.1
+    container_name: deployment-elasticsearch-1
     environment:
       discovery.type: single-node
-      xpack.security.enabled: "false"
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
     ports:
       - "9200:9200"
     volumes:
@@ -63,7 +72,7 @@ services:
     container_name: deployment-neo4j-1
     ports:
       - "7474:7474"                   # HTTP Browser
-      - "7687:7687"                   # Bolt / Bloom
+      - "7687:7687"                   # Bolt / Bloomcomo
     environment:
       NEO4J_AUTH: ${NEO4J_AUTH}
       NEO4J_ACCEPT_LICENSE_AGREEMENT: ${NEO4J_ACCEPT_LICENSE_AGREEMENT}
@@ -140,7 +149,8 @@ services:
       RUN_MITRE_INGESTOR: ${RUN_MITRE_INGESTOR}
       MITRE_DOMAINS: "enterprise-attack,mobile-attack,ics-attack"
     volumes:
-      - mitre_staging:/data                # aquí escribe el bundle JSON
+      - mitre_staging:/data                
+      - stix_dropzone:/app/dropzone
     depends_on:
       - kafka
       - neo4j
@@ -413,6 +423,7 @@ services:
       KAFKA_GROUP_ID: cg-elasticsearch
       KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps,stix.mitre
       ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD}
     depends_on:
       - kafka
       - elasticsearch
@@ -443,19 +454,21 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════
   
   kibana:
-    image: docker.elastic.co/kibana/kibana:8.12.0
+    image: docker.elastic.co/kibana/kibana:9.3.1
     container_name: deployment-kibana-1
-    ports:
-      - "5601:5601"
+    ports: ["5601:5601"]
     environment:
       ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
       I18N_LOCALE: "es-ES"
-      # Para poder embeberlo en tu frontend después:
       KIBANA_SETTING_XPACK_SECURITY_SAMESITECOOKIES: "none" 
+      ELASTICSEARCH_SERVICEACCOUNTTOKEN: ${ELASTICSEARCH_SERVICEACCOUNTTOKEN}
+      XPACK_SECURITY_ENCRYPTIONKEY: ${ELASTICSEARCH_SERVICEACCOUNTTOKEN}
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: ${XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY}
+      XPACK_REPORTING_ENCRYPTIONKEY: ${XPACK_REPORTING_ENCRYPTIONKEY}
     deploy:
       resources:
         limits:
-          memory: 1G  # Controlamos el consumo de RAM
+          memory: 1G  
     depends_on:
       - elasticsearch
     networks:
@@ -471,6 +484,7 @@ services:
       # Estos los obtendremos de la interfaz de Kibana (Fleet)
       - FLEET_ENROLLMENT_TOKEN=${FLEET_ENROLL_TOKEN:-} 
       - FLEET_URL=http://kibana:5601
+      - ELASTICSEARCH_SERVICEACCOUNTTOKEN=${ELASTICSEARCH_SERVICEACCOUNTTOKEN}
     volumes:
       - stix_dropzone:/app/dropzone:ro # El agente solo lee
     deploy:
@@ -499,6 +513,7 @@ services:
       NEO4J_USER: ${NEO4J_USER}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD}
     depends_on:
       - neo4j
       - elasticsearch
@@ -558,3 +573,4 @@ volumes:
   kevin_mongo_data:
   mitre_staging:
   stix_dropzone:
+  kafka_data:

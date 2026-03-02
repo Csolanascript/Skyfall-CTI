@@ -9,6 +9,7 @@ MITRE_BASE_URL = os.getenv("MITRE_BASE_URL", "https://raw.githubusercontent.com/
 NEO4J_URL = os.getenv("NEO4J_URL", "bolt://neo4j:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASS = os.getenv("NEO4J_PASS", "skyfall2026")
+MITRE_OUTPUT_PATH = os.getenv("MITRE_OUTPUT_PATH", "/app/mitre_staging/mitre_bundle.json")
 
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
@@ -62,6 +63,25 @@ def download_mitre_domain(domain: str) -> dict:
     resp = requests.get(url, timeout=120); resp.raise_for_status()
     return resp.json()
 
+def save_bundle_for_elastic(objects: list):
+    """Guarda los objetos en un archivo JSON en el volumen compartido."""
+    print(f"[mitre-ingestor] Generando Bundle para Elastic en {MITRE_OUTPUT_PATH}...")
+    
+    # Creamos la estructura de Bundle STIX
+    bundle = {
+        "type": "bundle",
+        "id": "bundle--skyfall-mitre-data",
+        "objects": objects
+    }
+    
+    # Aseguramos que el directorio existe
+    os.makedirs(os.path.dirname(MITRE_OUTPUT_PATH), exist_ok=True)
+    
+    with open(MITRE_OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(bundle, f, ensure_ascii=False)
+    
+    print(f"[mitre-ingestor] Archivo guardado correctamente ({len(objects)} objetos).")
+
 def main():
     if os.getenv("RUN_MITRE_INGESTOR", "0") != "1":
         print("[mitre-ingestor] RUN_MITRE_INGESTOR=0. Saliendo.")
@@ -71,6 +91,8 @@ def main():
     for domain in MITRE_DOMAINS:
         bundle = download_mitre_domain(domain.strip())
         all_objects.extend(bundle.get("objects", []))
+    
+    save_bundle_for_elastic(all_objects)
 
     print(f"\n[mitre-ingestor] Conectando a Neo4j en {NEO4J_URL}...")
     loader = Neo4jLoader(NEO4J_URL, NEO4J_USER, NEO4J_PASS)
