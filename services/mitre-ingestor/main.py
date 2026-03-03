@@ -114,7 +114,7 @@ def main():
         print("[!] Error: Neo4j no respondió. Revisa los logs de neo4j."); return
 
     try:
-        #loader.load_stix_objects(all_objects)
+        loader.load_stix_objects(all_objects)
         print("[mitre-ingestor] ¡Carga completada con éxito!")
     finally:
         loader.close()

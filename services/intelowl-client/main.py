@@ -207,15 +207,15 @@ def _delivery_report(err, msg):
 
 def _publish_result(topic: str, key: str, payload: dict):
     """Publica un resultado en el topic Kafka de salida."""
-    if _producer is None:
-        return
-    _producer.produce(
-        topic,
-        key=key.encode("utf-8"),
-        value=json.dumps(payload, default=str).encode("utf-8"),
-        callback=_delivery_report,
-    )
-    _producer.poll(0)
+    #if _producer is None:
+    #    return
+    #_producer.produce(
+    #    topic,
+    #    key=key.encode("utf-8"),
+    #    value=json.dumps(payload, default=str).encode("utf-8"),
+    #    callback=_delivery_report,
+    #)
+    #_producer.poll(0)
 
 
 # ──────────────────────────────────────────────────────────────────────

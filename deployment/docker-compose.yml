@@ -27,7 +27,7 @@ services:
       CLUSTER_ID: ${KAFKA_CLUSTER_ID}
       
       # --- Listeners ---
-      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092'
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
@@ -364,7 +364,9 @@ services:
   intelowl-celery-worker:
     image: intelowlproject/intelowl:v6.5.1
     restart: unless-stopped
-    stop_grace_period: 10s
+    stop_grace_period: 5s
+    deploy:
+      replicas: 2
     entrypoint:
       - ./docker/entrypoints/celery_default.sh
     environment: *intelowl-env
@@ -438,10 +440,11 @@ services:
       PYTHONUNBUFFERED: "1"
       KAFKA_BROKER: kafka:29092
       KAFKA_GROUP_ID: cg-neo4j
-      KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps,stix.mitre
+      KAFKA_TOPICS: stix.cve,stix.osint,stix.telegram,stix.social,stix.dumps,stix.mitre,enrichment.results
       NEO4J_URI: ${NEO4J_URI}
       NEO4J_USER: ${NEO4J_USER}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      CORRELATE: "true"
     depends_on:
       - kafka
       - neo4j
