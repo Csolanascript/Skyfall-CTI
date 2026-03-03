@@ -150,7 +150,6 @@ services:
       MITRE_DOMAINS: "enterprise-attack,mobile-attack,ics-attack"
     volumes:
       - mitre_staging:/data                
-      - stix_dropzone:/app/dropzone
     depends_on:
       - kafka
       - neo4j
@@ -428,7 +427,7 @@ services:
       - kafka
       - elasticsearch
     volumes:
-      - stix_dropzone:/app/dropzone
+      - mitre_staging:/app/mitre_staging
     networks:
       - skyfall_backbone
 
@@ -476,24 +475,21 @@ services:
       - skyfall_public
 
   elastic-agent:
-    image: docker.elastic.co/beats/elastic-agent:8.12.0
-    container_name: deployment-elastic-agent-1
+    image: docker.elastic.co/elastic-agent/elastic-agent:9.3.1
+    container_name: skyfall-elastic-agent
     restart: always
     user: root 
     environment:
-      # Estos los obtendremos de la interfaz de Kibana (Fleet)
-      - FLEET_ENROLLMENT_TOKEN=${FLEET_ENROLL_TOKEN:-} 
-      - FLEET_URL=http://kibana:5601
-      - ELASTICSEARCH_SERVICEACCOUNTTOKEN=${ELASTICSEARCH_SERVICEACCOUNTTOKEN}
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
+      - ELASTICSEARCH_API_KEY= ${ELASTICSEARCH_API_KEY}
+
     volumes:
-      - stix_dropzone:/app/dropzone:ro # El agente solo lee
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-    depends_on:
-      - elasticsearch
-      - kibana
+      - ./elastic-agent.yml:/usr/share/elastic-agent/elastic-agent.yml:ro
+      - mitre_staging:/app/mitre_staging:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
     networks:
       - skyfall_backbone
       - skyfall_public
@@ -572,5 +568,4 @@ volumes:
   intelowl_shared_files:
   kevin_mongo_data:
   mitre_staging:
-  stix_dropzone:
   kafka_data:
