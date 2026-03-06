@@ -1,0 +1,2 @@
+[console_scripts]
+pyintelowl = pyintelowl.main:cli
